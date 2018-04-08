@@ -10,8 +10,6 @@ import pycoin
 import pandas as pd
 import sys
 
-myaddress = '1PstYL7f1iUCTtbWfUkYbqg8FkifHTyauK'
-
 rpc_connection = AuthServiceProxy("http://%s:%s@127.0.0.1:8332"%('alice', 'passw0rd'))
 
 SANTOSIS_IN_BTC = 10**8
