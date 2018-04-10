@@ -4,7 +4,7 @@ import json
 import datetime
 import pandas as pd
 
-myaddress = "1PstYL7f1iUCTtbWfUkYbqg8FkifHTyauK"
+myaddress = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 btcval = 100000000.0 # in santoshis
 
