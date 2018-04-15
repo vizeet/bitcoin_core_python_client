@@ -9,12 +9,63 @@ from pycoin.ecdsa.numbertheory import modular_sqrt
 import pycoin
 import pandas as pd
 import sys
+import datetime
+import os
+import glob
+
+myaddress = '1PstYL7f1iUCTtbWfUkYbqg8FkifHTyauK'
 
 rpc_connection = AuthServiceProxy("http://%s:%s@127.0.0.1:8332"%('alice', 'passw0rd'))
 
 SANTOSIS_IN_BTC = 10**8
 
-def hash2LittleEndian2LittleEndian(a, b):
+# Every Block Height at which Block Reward becomes Half
+BLOCK_REWARD_HALVING = 210000
+BLOCK_REWARD_1 = 50 * SANTOSIS_IN_BTC
+
+N_TIME_1 = 1231006505
+
+def getCurrentBlockReward():
+    block_height = getCurrentBlockHeight()
+    block_halving_count = int(block_height / BLOCK_REWARD_HALVING)
+    current_block_reward = BLOCK_REWARD_1 / (2 ** block_halving_count)
+    return current_block_reward
+
+def getCurrentBitcoinInCirculation():
+    block_height = getCurrentBlockHeight()
+    block_halving_count = int(block_height / BLOCK_REWARD_HALVING)
+    block_reward = BLOCK_REWARD_1 / SANTOSIS_IN_BTC
+    bitcoin_in_circulation = 0
+    for block_halfing_index in range(block_halving_count):
+        bitcoin_in_circulation += (BLOCK_REWARD_HALVING * block_reward)
+        block_reward = block_reward / 2
+    bitcoin_in_circulation += (block_height % BLOCK_REWARD_HALVING) * block_reward
+    return bitcoin_in_circulation
+
+def getBitcoinCirculationLimit():
+    block_reward = BLOCK_REWARD_1 / SANTOSIS_IN_BTC
+    bitcoin_in_circulation = 0
+    while block_reward != round(block_reward / 2, 8):
+        bitcoin_in_circulation += (BLOCK_REWARD_HALVING * block_reward)
+        block_reward = block_reward / 2
+    return bitcoin_in_circulation
+
+def getDateToReachLimit():
+    block_reward = BLOCK_REWARD_1 / SANTOSIS_IN_BTC
+    block_halving_count = 0
+    while round(block_reward, 8) != round(block_reward / 2, 8):
+        block_halving_count += 1
+        block_reward = block_reward / 2
+    sec_to_mine_zero_reward_block = 10 * BLOCK_REWARD_HALVING * block_halving_count * 60
+    unix_sec = N_TIME_1 + sec_to_mine_zero_reward_block
+    time_of_zero_reward_block = datetime.datetime.fromtimestamp(unix_sec).strftime('%Y-%m-%d %H:%M:%S')
+    return time_of_zero_reward_block
+
+def getCurrentBlockchainSizeInGB():
+    blockchain_size = sum(os.path.getsize(f) for f in glob.glob(os.path.join(os.getenv('HOME'),'.bitcoin', 'blocks', 'blk0*.dat')))
+    return blockchain_size / (2 ** 30)
+
+def hash2LittleEndian2LittleEndian(a:str, b:str):
      # Reverse inputs before and after hashing due to big-endian / little-endian nonsense
      a1 = binascii.unhexlify(a)[::-1]
      b1 = binascii.unhexlify(b)[::-1]
@@ -25,7 +76,7 @@ def hashBigEndian2LittleEndian(a: str):
      h = hashlib.sha256(hashlib.sha256(bytes.fromhex(a)).digest()).digest() 
      return binascii.hexlify(h[::-1])
 
-def build_merkle_root(hash_list):
+def build_merkle_root(hash_list: list):
         if len(hash_list) < 2:
             return hash_list[0]
         new_hash_list = []
@@ -159,16 +210,16 @@ def totalTransactionFeeInBlock(block_height: int):
 def getNetworkHashRate(block_height: int):
         block = getBlock(block_height)
         target_threshold = int(getTargetThreshold(block['bits']), 16)
-        network_hashrate = (2 ** 256) / ((target_threshold - 1) * 600)
+        network_hashrate = (2 ** 256) / ((target_threshold + 1) * 600)
         return network_hashrate
 
 #
-DIFFICULTY_1 = 0x00ffff * (256 ** 26)
+TARGET_THRESHOLD_1 = 0x00ffff * (256 ** 26)
 
 def getDifficulty(block_height: int):
         block = getBlock(block_height)
         target_threshold = int(getTargetThreshold(block['bits']), 16)
-        difficulty = DIFFICULTY_1 / target_threshold
+        difficulty = TARGET_THRESHOLD_1 / target_threshold
 
         return difficulty
 
@@ -380,12 +431,12 @@ def getTotalNetworkFeesInBlock(block_height: int):
 #def getTotalNetworkFeesForAddress(address: str):
 
 
-def sha256d(bstr):
+def double_sha256d(bstr):
     return hashlib.sha256(hashlib.sha256(bstr).digest()).digest()
 
 def convertPKHToAddress(prefix, addr):
     data = prefix + addr
-    return base58.b58encode(data + sha256d(data)[:4])
+    return base58.b58encode(data + double_sha256d(data)[:4])
 
 def pubkeyToAddress(pubkey_hex):
         pubkey = bytearray.fromhex(pubkey_hex)
@@ -446,6 +497,21 @@ def getFullPubKeyFromCompressed(x_str: str):
 if __name__ == '__main__':
         current_block_height = getCurrentBlockHeight()
         print("Current Block Height = %d" % (current_block_height))
+
+        current_block_reward = getCurrentBlockReward()
+        print("Current Block Reward in BTC = %.8f" % (current_block_reward / SANTOSIS_IN_BTC))
+
+        current_bitcoin_in_circulation = getCurrentBitcoinInCirculation()
+        print("Current Bitcoin In Circulation = %d" % current_bitcoin_in_circulation)
+
+        bitcoin_circulation_limit = getBitcoinCirculationLimit()
+        print("Bitcoin Circulation Limit = %d" % bitcoin_circulation_limit)
+
+        time_of_zero_reward_block = getDateToReachLimit()
+        print("Time of Zero Reward block = %s" % time_of_zero_reward_block)
+
+        blockchain_size = getCurrentBlockchainSizeInGB()
+        print("Blockchain Size in GB = %d" % blockchain_size)
 
         current_block_hash = getBlockHash(current_block_height)
         print("Block Header Hash = %x for Block Height = %d" % (int(current_block_hash, 16), current_block_height))
