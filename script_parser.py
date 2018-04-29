@@ -103,23 +103,23 @@ def hash256(bstr):
     return hashlib.sha256(hashlib.sha256(bstr).digest()).digest()
 
 # need to fix this TODO
-def getFullPubKeyFromCompressed(x_str: bytes):
-        prefix = x_str[0:1]
+def getFullPubKeyFromCompressed(x_b: bytes):
+        prefix = x_b[0:1]
         print("prefix = %s" % bytes.decode(binascii.hexlify(prefix)))
-        x_str = x_str[1:]
-        x = int(x_str, 16)
+        x_str = x_b[1:]
+        x = int.from_bytes(x_b)
         print("x = %x" % (x))
         p = bytes(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F)
         y_squared = (x**3 + 7) % p
         y = modular_sqrt(y_squared, p)
-        y_str = "%x" % y
-        print("y_str = %s" % (y_str))
-        y_is_even = (int(y_str[-1], 16) % 2 == 0)
-        if prefix == "02" and y_is_even == False or prefix == "03" and y_is_even == True:
+        y_b = bytes(y)
+        print("y_str = %s" % bytes.decode(binascii.hexlify(y_b)))
+        y_is_even = (int(y_b[-1]) % 2 == 0)
+        if (prefix == b'02' and y_is_even == False) or (prefix == '03' and y_is_even == True):
                 y = p - y
-                y_str = "%x" % y
-        print("y = %s" % (y_str))
-        return "04" + x_str + y_str
+                y_b = bytes(y)
+        print("y = %s" % bytes.decode(binascii.hexlify(y_b)))
+        return b'04' + x_b + y_b
 
 def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn: bytes):
         txn_sha256_b = hashlib.sha256(raw_txn).digest()
@@ -132,7 +132,7 @@ def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn: bytes):
 
         print("full public key = %s" % bytes.decode(binascii.hexlify(pubkey_b)))
         vk = ecdsa.VerifyingKey.from_string(pubkey_b, curve=ecdsa.SECP256k1)
-        if vk.verify(sig_b, txn_sha256_b, hashlib.sha256) == True: # True
+        if vk.verify(sig_b, txn_sha256_b, hashlib.sha256) == True:
                 return True
         else:
                 return False
@@ -384,26 +384,54 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         is_valid = sigcheck(sig_b, pubkey_b, signed_txn)
                         stack.push(is_valid)
                         return op_verify(stack)
-                elif code == 0xae: # OP_CHECKMULTISIG TODO
-                        pubkey_count = stack.pop()
-                        pubkey_array = [stack.pop() for index in range(pubkey_count)]
-                        sig_count = stack.pop()
-                        sig_array = [stack.pop() for index in range(sig_count)]
-                elif code == 0xaf: # OP_CHECKMULTISIGVERIFY TODO
-                        pubkey_count = stack.pop()
-                        pubkey_array = [stack.pop() for index in range(pubkey_count)]
-                        success_sigverify_remaining = stack.pop()
-                        
-                        sig_array = [stack.pop() for index in range(sig_count)]
-                        while success_sigverify_remaining > 0:
-                                sig = stack.pop()
-                                if sig == 0x00:
-                                        stack.push(OP_FALSE)
-                                        return op_verify(stack)
-                                is_valid = sigcheck(sig_b, pubkey_b, signed_txn)
-                                if bool(is_valid) is True:
-                                       success_sigverify_remaining -= 1 
-                        stack.push(OP_FALSE)
+                elif code == 0xae: # OP_CHECKMULTISIG <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIG>
+                        pubkey_count = stack.pop() - OP_0
+                        pubkey_array = [stack.pop() for index in range(pubkey_count)][::-1]
+                        min_valid_sig_count = stack.pop() - OP_0
+                        sig_array = []
+                        remaining_valid_sig = min_valiv_sig_count
+                        while True:
+                                sig_b = stack.pop()
+                                if sig_b == OP_0:
+                                        sig_array = sig_array[::-1]
+                                        break;
+                                sig_array.append(sig_b)
+                        sig_index = 0
+                        is_valid = OP_FALSE
+                        for pubkey_b in pubkey_array:
+                                sig_b = sig_array[sig_index]
+                                is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
+                                if is_valid_sig == True:
+                                        remaining_valid_sig -= 1
+                                        if remaining_valid_sig == 0:
+                                                is_valid = OP_TRUE
+                                                break
+                                        continue
+                        stack.push(is_valid)
+                elif code == 0xaf: # OP_CHECKMULTISIGVERIFY <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIGVERIFY>
+                        pubkey_count = stack.pop() - OP_0
+                        pubkey_array = [stack.pop() for index in range(pubkey_count)][::-1]
+                        min_valid_sig_count = stack.pop() - OP_0
+                        sig_array = []
+                        remaining_valid_sig = min_valiv_sig_count
+                        while True:
+                                sig_b = stack.pop()
+                                if sig_b == OP_0:
+                                        sig_array = sig_array[::-1]
+                                        break;
+                                sig_array.append(sig_b)
+                        sig_index = 0
+                        is_valid = OP_FALSE
+                        for pubkey_b in pubkey_array:
+                                sig_b = sig_array[sig_index]
+                                is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
+                                if is_valid_sig == True:
+                                        remaining_valid_sig -= 1
+                                        if remaining_valid_sig == 0:
+                                                is_valid = OP_TRUE
+                                                break
+                                        continue
+                        stack.push(is_valid)
                         return op_verify(stack)
                 elif code == 0xb1: # OP_CHECKLOCKTIMEVERIFY
                 elif code == 0xb2: # OP_CHECKSEQUENCEVERIFY
