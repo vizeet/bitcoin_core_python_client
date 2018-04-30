@@ -102,52 +102,55 @@ def op_verify(stack: list)
 def hash256(bstr):
     return hashlib.sha256(hashlib.sha256(bstr).digest()).digest()
 
-# need to fix this TODO
 def getFullPubKeyFromCompressed(x_b: bytes):
         prefix = x_b[0:1]
-        print("prefix = %s" % bytes.decode(binascii.hexlify(prefix)))
-        x_str = x_b[1:]
-        x = int.from_bytes(x_b)
-        print("x = %x" % (x))
-        p = bytes(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F)
-        y_squared = (x**3 + 7) % p
-        y = modular_sqrt(y_squared, p)
-        y_b = bytes(y)
-        print("y_str = %s" % bytes.decode(binascii.hexlify(y_b)))
-        y_is_even = (int(y_b[-1]) % 2 == 0)
-        if (prefix == b'02' and y_is_even == False) or (prefix == '03' and y_is_even == True):
-                y = p - y
-                y_b = bytes(y)
-        print("y = %s" % bytes.decode(binascii.hexlify(y_b)))
-        return b'04' + x_b + y_b
+        print('prefix = %s' % prefix)
+        p = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
+        print('(p+1)/4 = %d' % ((p + 1) >> 2))
+        x_b = x_b[1:33]
+        x = int.from_bytes(x_b, byteorder='big')
 
-def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn: bytes):
-        txn_sha256_b = hashlib.sha256(raw_txn).digest()
+        y_square = (pow(x, 3, p)  + 7) % p
+        y_square_square_root = pow(y_square, ((p+1) >> 2), p)
+        if (prefix == b"\x02" and y_square_square_root & 1) or (prefix == b"\x03" and not y_square_square_root & 1):
+            y = (-y_square_square_root) % p
+        else:
+            y = y_square_square_root
 
-        prefix = pubkey_b[0]
-        if prefix == b'02' or prefix == b'03':
-                pubkey = getFullPubKeyFromCompressed(pubkey_b)[1:]
-        elif prefix == b'04':
+        y_b = y.to_bytes(32, 'big')
+        full_pubkey_b = b''.join([b'\x04', x_b, y_b])
+        return full_pubkey_b
+
+def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn_b: bytes):
+        txn_sha256_b = hashlib.sha256(raw_txn_b).digest()
+
+        prefix = pubkey_b[0:1]
+        print('prefix = %s' % prefix)
+        if prefix == b'\x02' or prefix == b'\x03':
+                pubkey_b = getFullPubKeyFromCompressed(pubkey_b)[1:]
+        elif prefix == b'\x04':
                 pubkey_b = pubkey_b[1:]
 
         print("full public key = %s" % bytes.decode(binascii.hexlify(pubkey_b)))
         vk = ecdsa.VerifyingKey.from_string(pubkey_b, curve=ecdsa.SECP256k1)
         if vk.verify(sig_b, txn_sha256_b, hashlib.sha256) == True:
-                return True
+                print('valid')
+                return 1
         else:
-                return False
+                print('invalid')
+                return 0
 
-def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, signed_txn: bytes):
+def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, signed_txn: bytes, n_lock_time: int, n_sequence: int):
         if_stack = []
 
         start = mptr.tell()
         while mptr.tell() <= start + script_len:
                 code = int.from_bytes(mptr.read(1))
                 if len(if_stack) > 0:
-                        if if_stack[-1] == False:
+                        if if_stack[-1] == OP_FALSE:
                                 if code == 0x67: # OP_ELSE
                                         if_stack.pop()
-                                        if_stack.push(True)
+                                        if_stack.push(OP_TRUE)
                                 elif code == 0x68: # OP_ENDIF
                                         if_stack.pop()
                                 else:
@@ -155,19 +158,17 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         else:
                                 if code == 0x67: # OP_ELSE
                                         if_stack.pop()
-                                        if_stack.push(False)
+                                        if_stack.push(OP_FALSE)
                                 elif code == 0x68: # OP_ENDIF
                                         if_stack.pop()
                 if code == 0x00: # OP_0, OP_FALSE
-                        array = b''
-                        while mptr.read(1) == b'\x00':
-                                array += b'\x00'
+                        stack.push(0)
                 elif code <= 0x4e: # push data
                         pushdata_op(mptr, code, stack)
                 elif code == 0x4f: # OP_1NEGATE
                         stack.push(-1)
                 elif code == 0x51: # OP_1, OP_TRUE
-                        stack.push(True)
+                        stack.push(1)
                 elif code <= 0x60: # OP_2-OP_16
                         stack.push(code - 0x50)
                 elif code <= 0x61: # OP_NOP
@@ -193,7 +194,7 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                                 stack.push(val)
                                 stack.push(val)
                 elif code == 0x74: # OP_DEPTH
-                                stack.push(len(stack))
+                        stack.push(len(stack))
                 elif code == 0x75: # OP_DROP
                         stack.pop()
                 elif code == 0x76: # OP_DUP
@@ -261,16 +262,16 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         val1 = stack.pop(-2) # x1
                         val2 = stack.pop(-1) # x2
                         if val1 == val2:
-                                return True
+                                stack.push(1)
                         else:
-                                return False
+                                stack.push(0)
                 elif code == 0x88: # OP_EQUALVERIFY
                         val1 = stack.pop(-2) # x1
                         val2 = stack.pop(-1) # x2
                         if val1 == val2:
-                                stack.push(True)
+                                stack.push(1)
                         else:
-                                stack.push(False)
+                                stack.push(0)
                         return op_verify(stack)
                 elif code == 0x8b: # OP_1ADD
                         val = stack.pop()
@@ -371,7 +372,7 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         pubkey = stack.pop()
                         pubkey_hash256 = hash256(pubkey)
                         stack.push(pubkey_hash256)
-                elif code == 0xab: # OP_CODESEPARATOR
+                elif code == 0xab: # OP_CODESEPARATOR TODO
                         pass
                 elif code == 0xac: # OP_CHECKSIG sig pubkey
                         pubkey_b = stack.pop()
@@ -389,7 +390,7 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         pubkey_array = [stack.pop() for index in range(pubkey_count)][::-1]
                         min_valid_sig_count = stack.pop() - OP_0
                         sig_array = []
-                        remaining_valid_sig = min_valiv_sig_count
+                        remaining_valid_sig = min_valid_sig_count
                         while True:
                                 sig_b = stack.pop()
                                 if sig_b == OP_0:
@@ -397,14 +398,14 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                                         break;
                                 sig_array.append(sig_b)
                         sig_index = 0
-                        is_valid = OP_FALSE
+                        is_valid = 0
                         for pubkey_b in pubkey_array:
                                 sig_b = sig_array[sig_index]
                                 is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
-                                if is_valid_sig == True:
+                                if is_valid_sig == 1:
                                         remaining_valid_sig -= 1
                                         if remaining_valid_sig == 0:
-                                                is_valid = OP_TRUE
+                                                is_valid = 1
                                                 break
                                         continue
                         stack.push(is_valid)
@@ -421,22 +422,28 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                                         break;
                                 sig_array.append(sig_b)
                         sig_index = 0
-                        is_valid = OP_FALSE
+                        is_valid = 0
                         for pubkey_b in pubkey_array:
                                 sig_b = sig_array[sig_index]
                                 is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
-                                if is_valid_sig == True:
+                                if is_valid_sig == 1:
                                         remaining_valid_sig -= 1
                                         if remaining_valid_sig == 0:
-                                                is_valid = OP_TRUE
+                                                is_valid = 1
                                                 break
                                         continue
                         stack.push(is_valid)
                         return op_verify(stack)
-                elif code == 0xb1: # OP_CHECKLOCKTIMEVERIFY
-                elif code == 0xb2: # OP_CHECKSEQUENCEVERIFY
-                elif code == 0xfd: # OP_PUBKEYHASH
-                elif code == 0xfe: # OP_PUBKEY
+                elif code == 0xb1: # OP_CHECKLOCKTIMEVERIFY TODO
+                        if len(stack) == 0:
+                                return False
+                        val = int(binascii.hexlify(stack.pop()[::-1]), 16)
+                        if val > n_lock_time or val < 0 or n_sequence == 0xffffffff:
+                                return False
+                elif code == 0xb2: # OP_CHECKSEQUENCEVERIFY TODO
+                        val = int(binascii.hexlify(stack.pop()[::-1]), 16)
+                        if val < n_lock_time:
+                                return False
                 else: # Any non assigned opcode
                         return False
 
