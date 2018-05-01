@@ -1,8 +1,9 @@
-from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
+import binascii
+import hashlib
+import ecdsa
+import leveldb_parser
 
-raw_txn_bytes = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198beed7b440999000000004a493046022100c0f693e024f966dc5f834324baa38426bba05460a2b3f9920989d38322176460022100c523a3aa62da26db1fc1902a93741dce3489629df18be11ba68ff9586041821601ffffffff0100f2052a010000001976a9148773ec867e322378e216eefe55bfcede5263059b88ac00000000'
-
-raw_txn = b'\x01\x00\x00\x00\x01/\x03\x08-0\x0e\xfd\x92\x83}?m\x91\n!\xd9\xd1\x9e\x86\x82B\xcf\xeb\xb2\x11\x98\xbe\xed{D\t\x99\x00\x00\x00\x00JI0F\x02!\x00\xc0\xf6\x93\xe0$\xf9f\xdc_\x83C$\xba\xa3\x84&\xbb\xa0T`\xa2\xb3\xf9\x92\t\x89\xd3\x83"\x17d`\x02!\x00\xc5#\xa3\xaab\xda&\xdb\x1f\xc1\x90*\x93t\x1d\xce4\x89b\x9d\xf1\x8b\xe1\x1b\xa6\x8f\xf9X`A\x82\x16\x01\xff\xff\xff\xff\x01\x00\xf2\x05*\x01\x00\x00\x00\x19v\xa9\x14\x87s\xec\x86~2#x\xe2\x16\xee\xfeU\xbf\xce\xdeRc\x05\x9b\x88\xac\x00\x00\x00\x00'
+raw_txn_str = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198beed7b440999000000004a493046022100c0f693e024f966dc5f834324baa38426bba05460a2b3f9920989d38322176460022100c523a3aa62da26db1fc1902a93741dce3489629df18be11ba68ff9586041821601ffffffff0100f2052a010000001976a9148773ec867e322378e216eefe55bfcede5263059b88ac00000000'
 
 g_script_command_info = {}
 
@@ -94,7 +95,7 @@ def op_pushdata(mptr: mmap, code: int, stack: list)
                         stack.push(mptr.read(size))
 
 def op_verify(stack: list)
-        if stack.pop() == True:
+        if stack.pop() == 1:
                 return True
         else:
                 return False
@@ -180,7 +181,8 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         else:
                                 if_stack.push(True)
                 elif code == 0x69: # OP_VERIFY
-                        return op_verify(stack)
+                        if op_verify(stack) == False:
+                                return False
                 elif code == 0x6a: # OP_RETURN
                         pushdata_op(mptr, mptr.read(1), stack)
                         return False
@@ -272,7 +274,8 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                                 stack.push(1)
                         else:
                                 stack.push(0)
-                        return op_verify(stack)
+                        if op_verify(stack) == False:
+                                return False
                 elif code == 0x8b: # OP_1ADD
                         val = stack.pop()
                         stack.push(val + 1)
@@ -315,7 +318,8 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         val2 = stack.pop()
                         val1 = stack.pop()
                         stack.push(val1 == val2)
-                        return op_verify(stack)
+                        if op_verify(stack) == False:
+                                return False
                 elif code == 0x9e: # OP_NUMNOTEQUAL
                         val2 = stack.pop()
                         val1 = stack.pop()
@@ -381,10 +385,11 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         stack.push(is_valid)
                 elif code == 0xad: # OP_CHECKSIGVERIFY
                         pubkey_b = stack.pop()
-                        sig_b = stack.pop()
+                        sig_b = stack.pop() # this is R, S and sig_type
                         is_valid = sigcheck(sig_b, pubkey_b, signed_txn)
                         stack.push(is_valid)
-                        return op_verify(stack)
+                        if op_verify(stack) == False:
+                                return False
                 elif code == 0xae: # OP_CHECKMULTISIG <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIG>
                         pubkey_count = stack.pop() - OP_0
                         pubkey_array = [stack.pop() for index in range(pubkey_count)][::-1]
@@ -433,7 +438,8 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                                                 break
                                         continue
                         stack.push(is_valid)
-                        return op_verify(stack)
+                        if op_verify(stack) == False:
+                                return False
                 elif code == 0xb1: # OP_CHECKLOCKTIMEVERIFY TODO
                         if len(stack) == 0:
                                 return False
@@ -465,60 +471,57 @@ def pubkeyToAddress(pubkey_hex):
         pubkey_hash = h.digest()
         return convertPKHToAddress(b'\x00', pubkey_hash)
 
+def getSignedTxn(sig_type: bytes):
+
 def getTransaction(mptr: mmap):
         txn = {}
         mptr_read = mptr.read(4)
-        raw_txn = mptr_read
         raw_txn_for_sign = mptr_read
-        txn['version'] = int(binascii.hexlify(mptr_read[::-1]), 16)
+        txn_version = mptr_read
         mptr_read = getCountBytes(mptr)
         input_count = getCount(mptr_read)
         if input_count == 0:
                 # post segwit
-                txn['is_segwit'] = bool(int(binascii.hexlify(mptr.read(1)), 16))
+                is_segwit = mptr.read(1)
                 mptr_read = getCountBytes(mptr)
-                txn['input_count'] = getCount(mptr_read)
+                input_count = getCount(mptr_read)
         else:
-                txn['input_count'] = input_count
-        raw_txn += mptr_read
+                input_count = input_count
         raw_txn_for_sign += mptr_read
-        txn['input'] = []
-        for index in range(txn['input_count']):
+        for index in range(input_count):
+                stack = []
+                alt_stack = []
                 txn_input = {}
                 mptr_read = mptr.read(32)
-                raw_txn += mptr_read
                 raw_txn_for_sign += mptr_read
-                txn_input['prev_txn_hash'] = bytes.decode(binascii.hexlify(mptr_read[::-1]))
+                prev_txn_hash = bytes.decode(binascii.hexlify(mptr_read[::-1]))
                 mptr_read = mptr.read(4)
-                raw_txn += mptr_read
                 raw_txn_for_sign += mptr_read
-                txn_input['prev_txn_out_index'] = int(binascii.hexlify(mptr_read[::-1]), 16)
-                parsed_sig = scriptSigParser(mptr)
+                prev_txn_out_index = int(binascii.hexlify(mptr_read[::-1]), 16)
+                mptr_read = getCountBytes(mptr)
+                scriptsig_size = getCount(mptr_read)
+                unlocking_script['size'] = txn_input['scriptsig_size']
+                unlocking_script['script_loc'] = mptr.tell()
+                unlocking_script['satoshis'] = getSatoshis(txn_input['prev_txn_hash'], txn_input['prev_txn_out_index'])
+                unlocking_script['stack'] = []
 #                mptr_read = getCountBytes(mptr)
-#                raw_txn += mptr_read
 #                txn_input['scriptsig_size'] = getCount(mptr_read)
 #                mptr_read = mptr.read(txn_input['scriptsig_size'])
-#                raw_txn += mptr_read
 #                txn_input['scriptsig'] = bytes.decode(binascii.hexlify(mptr_read))
                 mptr_read = mptr.read(4)
-                raw_txn += mptr_read
                 raw_txn_for_sign += mptr_read
-                txn_input['sequence'] = int(binascii.hexlify(mptr_read[::-1]), 16)
-                txn['input'].append(txn_input)
+                n_sequence = int(binascii.hexlify(mptr_read[::-1]), 16)
+                parsed_sig = scriptParser(mptr, txn_input['scriptsig_size'], stack, alt_stack, signed_txn, n_lock_time, n_sequence)
         mptr_read = getCountBytes(mptr)
-        raw_txn += mptr_read
-        txn['out_count'] = getCount(mptr_read)
-        txn['out'] = []
-        for index in range(txn['out_count']):
+        out_count = getCount(mptr_read)
+        out = []
+        for index in range(out_count):
                 txn_out = {}
                 mptr_read = mptr.read(8)
-                raw_txn += mptr_read
-                txn_out['_satoshis'] = int(binascii.hexlify(mptr_read[::-1]), 16)
+                satoshis = int(binascii.hexlify(mptr_read[::-1]), 16)
                 mptr_read = getCountBytes(mptr)
-                raw_txn += mptr_read
                 txn_out['scriptpubkey_size'] = getCount(mptr_read)
                 mptr_read = mptr.read(txn_out['scriptpubkey_size'])
-                raw_txn += mptr_read
                 txn_out['scriptpubkey'] = bytes.decode(binascii.hexlify(mptr_read))
                 txn['out'].append(txn_out)
         if 'is_segwit' in txn and txn['is_segwit'] == True:
@@ -539,7 +542,7 @@ def getTransaction(mptr: mmap):
 
         logging.debug(json.dumps(txn, indent=4))
         logging.debug('raw_txn_str = %s' % bytes.decode(binascii.hexlify(raw_txn)))
-        logging.debug('raw_txn_bytes = %s' % raw_txn)
+        logging.debug('raw_txn_b = %s' % raw_txn)
 
 #        check_raw_txn = rpc_connection.getrawtransaction(txn['txn_hash'])
 #        logging.debug('blockfile index = %d' % g_blockfile_index)
@@ -552,5 +555,7 @@ def getTransaction(mptr: mmap):
         return txn
 
 if __name__ == '__main__':
-        with mmap.mmap(-1, 1000) as mm:
+        raw_txn = binascii.unhexlify(raw_txn_str)
+        mem_size = len(raw_txn) + 1
+        with mmap.mmap(-1, memsize) as mm:
                 mm.write(raw_txn)
