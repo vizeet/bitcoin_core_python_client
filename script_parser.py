@@ -1,7 +1,7 @@
 import binascii
 import hashlib
 import ecdsa
-import leveldb_parser
+import leveldb_parser as ldb
 
 raw_txn_str = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198beed7b440999000000004a493046022100c0f693e024f966dc5f834324baa38426bba05460a2b3f9920989d38322176460022100c523a3aa62da26db1fc1902a93741dce3489629df18be11ba68ff9586041821601ffffffff0100f2052a010000001976a9148773ec867e322378e216eefe55bfcede5263059b88ac00000000'
 
@@ -473,7 +473,7 @@ def pubkeyToAddress(pubkey_hex):
 
 def getSignedTxn(sig_type: bytes):
 
-def getTransaction(mptr: mmap):
+def unlockTxn(mptr: mmap):
         txn = {}
         mptr_read = mptr.read(4)
         raw_txn_for_sign = mptr_read
@@ -559,3 +559,4 @@ if __name__ == '__main__':
         mem_size = len(raw_txn) + 1
         with mmap.mmap(-1, memsize) as mm:
                 mm.write(raw_txn)
+                unlockTxn(mm)

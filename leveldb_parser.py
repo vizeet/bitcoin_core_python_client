@@ -6,6 +6,18 @@ import binascii
 block_db = plyvel.DB(os.path.join(os.getenv('HOME'),".bitcoin/blocks/index"), compression=None)
 chainstate_db = plyvel.DB(os.path.join(os.getenv('HOME'),".bitcoin/chainstate"), compression=None)
 
+def getObfuscationKey():
+        it = chainstate_db.iterator(include_value=False)
+        key = next(it)
+        value = chainstate_db.get(key)
+        obfuscation_key = value[1:]
+        return obfuscation_key
+
+def applyObfuscationKey(data: bytes):
+        obfuscation_key = getObfuscationKey()
+        new_val = bytes(data[index] ^ obfuscation_key[index % len(obfuscation_key)] for index in range(len(data)))
+        return new_val
+
 def read_varint(raw_hex, pos):
     """
     Reads the weird format of VarInt present in src/serialize.h of bitcoin core
@@ -66,6 +78,13 @@ def isTxindex():
         else:
                 return False
 
+def getRecentBlockHash():
+        key = b'B'
+#        print(key)
+        block_hash_b = chainstate_db.get(key)
+        block_hash_b = applyObfuscationKey(block_hash_b)
+        return block_hash_b
+
 if __name__ == '__main__':
         txn_hash_str = 'd6030272a4e430b293c7f6152398ea47d8485e2e8c1719f841c9665ffee6a237'
         t = binascii.unhexlify(txn_hash_str)[::-1]
@@ -84,3 +103,5 @@ if __name__ == '__main__':
                 print('txindex is enabled')
         else:
                 print('txindex is disabled')
+        block_hash_b = getRecentBlockHash()
+        print('Latest stored block hash = %s' % bytes.decode(binascii.hexlify(block_hash_b[::-1])))
