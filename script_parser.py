@@ -141,6 +141,10 @@ def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn_b: bytes):
                 print('invalid')
                 return 0
 
+SCRIPT_IGNORE  = 0
+SCRIPT_INVALID = -1
+SCRIPT_PASS    = 1
+
 def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, signed_txn: bytes, n_lock_time: int, n_sequence: int):
         if_stack = []
 
@@ -376,8 +380,8 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         pubkey = stack.pop()
                         pubkey_hash256 = hash256(pubkey)
                         stack.push(pubkey_hash256)
-                elif code == 0xab: # OP_CODESEPARATOR TODO
-                        pass
+                elif code == 0xac: # OP_CODESEPARATOR 
+                        return False # we won't process this as this was widthrawn early in bitcoin
                 elif code == 0xac: # OP_CHECKSIG sig pubkey
                         pubkey_b = stack.pop()
                         sig_b = stack.pop()
