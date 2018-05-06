@@ -7,9 +7,6 @@ raw_txn_str = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198bee
 
 g_script_command_info = {}
 
-G_CODE = 0
-G_DATA = 1
-
 def getCount(count_bytes):
         txn_size = int(binascii.hexlify(count_bytes[0:1]), 16)
 
