@@ -2,13 +2,22 @@ import binascii
 import hashlib
 import ecdsa
 import leveldb_parser as ldb
+from opcode_declarations import * # OPCODE to value assignment such as OP_TRUE = 1
+#from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
+import io
+import mmap
+import os
+
+#rpc_connection = AuthServiceProxy("http://%s:%s@127.0.0.1:8332"%('alice', 'passw0rd'))
 
 raw_txn_str = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198beed7b440999000000004a493046022100c0f693e024f966dc5f834324baa38426bba05460a2b3f9920989d38322176460022100c523a3aa62da26db1fc1902a93741dce3489629df18be11ba68ff9586041821601ffffffff0100f2052a010000001976a9148773ec867e322378e216eefe55bfcede5263059b88ac00000000'
+#raw_txn_str = '01000000017f950ab790838e0c05e79856d25d586823fe139e1807405a3f207ff33f9b7663010000006b483045022100d8629403cd3b49950da9293653c6279149c029e6b7b15371342d0d2ce286c8f2022078787985a644e94fd9246f6c25733336c94af5f00d9d34a07dc2f9e0987ef990012102b726d7eae11a6d5cf3b2362e773e116a6140347dcee1b2943f4a2897351e5d90ffffffff021bf03c000000000017a91469f3757380a56820abc7052867216599e575cddd8777c1ca1c000000001976a914d5f950abe0b559b2b7a7ab3d18a507ea1c3e4ac688ac00000000'
+txn_hash = '4269fdc239d027922dcec96f1ae283dbaff10e2d1bd49605661d091e79714956'
 
 g_script_command_info = {}
 
 def getCount(count_bytes):
-        txn_size = int(binascii.hexlify(count_bytes[0:1]), 16)
+        txn_size = count_bytes[0]
 
         if txn_size < 0xfd:
                 return txn_size
@@ -22,7 +31,7 @@ def getCount(count_bytes):
                 txn_size = int(binascii.hexlify(count_bytes[1:9][::-1]), 16)
                 return txn_size
 
-def getCountBytes(mptr: mmap):
+def getCountBytes(mptr: io.BytesIO):
         mptr_read = mptr.read(1)
         count_bytes = mptr_read
         txn_size = int(binascii.hexlify(mptr_read), 16)
@@ -55,47 +64,39 @@ g_script_sig_dict = {
 }
 
 #unlocking script
-def getSigFromStack(mptr: mmap):
+def getSigFromStack(mptr: io.BytesIO):
         script_len = int.from_bytes(mptr.read(1))
         if g_script_sig_dict['DER'] is int.from_bytes(mptr.read(1)):
                 script_sig['seq_type'] = 'DER'
                 mptr_read = getCountBytes(mptr)
                 sig_size = getCount(mptr_read)
-                r_type = int.from_bytes(mptr.read(1))
+                r_type = int.from_bytes(mptr.read(1)) # this is always 2 and signifies int type
                 r_size = int.from_bytes(mptr.read(1))
                 if r_size == 0x21:
                         mptr.read(1)
                 r = mptr.read(0x20)
-                s_type = int.from_bytes(mptr.read(1))
+                s_type = int.from_bytes(mptr.read(1)) # this is always 2 and signifies int type
                 s_size = int.from_bytes(mptr.read(1))
                 if s_size == 0x21:
                         mptr.read(1)
                 s = mptr.read(0x20)
-                sig = r+s
+                sighash_type = mptr.read(1)
+                sig = r + s + sighash_type
         return sig
 
-def pushOnStack(stack: list):
-        stack.push(mptr.read(size))
-
-def op_pushdata(mptr: mmap, code: int, stack: list)
-        elif code <= 0x4b: # push data
+def op_pushdata(mptr: io.BytesIO, code: int, stack: list):
+        if code <= 0x4b: # push data
                 size = code
-                stack.push(mptr.read(size))
-        elif code == 0x4c: # OP_PUSHDATA1
+                stack.append(mptr.read(size))
+        elif code == OP_PUSHDATA1: # OP_PUSHDATA1
                 size = int.from_bytes(mptr.read(1))
-                stack.push(mptr.read(size))
-        elif code == 0x4d: # OP_PUSHDATA2
-                size = int.from_bytes(mptr.read(2), byteorder='little')
-                stack.push(mptr.read(size))
-                elif code == 0x4e: # OP_PUSHDATA4
-                        size = int.from_bytes(mptr.read(4), byteorder='little')
-                        stack.push(mptr.read(size))
-
-def op_verify(stack: list)
-        if stack.pop() == 1:
-                return True
-        else:
-                return False
+                stack.append(mptr.read(size))
+        elif code == OP_PUSHDATA2: # OP_PUSHDATA2
+                size = int.from_bytes(mptr.read(2), byteorder='big')
+                stack.append(mptr.read(size))
+        elif code == OP_PUSHDATA4: # OP_PUSHDATA4
+                size = int.from_bytes(mptr.read(4), byteorder='big')
+                stack.append(mptr.read(size))
 
 def hash256(bstr):
     return hashlib.sha256(hashlib.sha256(bstr).digest()).digest()
@@ -119,6 +120,32 @@ def getFullPubKeyFromCompressed(x_b: bytes):
         full_pubkey_b = b''.join([b'\x04', x_b, y_b])
         return full_pubkey_b
 
+def splitSig(complete_sig: bytes):
+        sigfp = io.BytesIO(complete_sig)
+        der = sigfp.read(1)
+        print('der = %s' % bytes.decode(binascii.hexlify(der)))
+        sig_len = sigfp.read(1)
+        print('sig_len = %d' % int(binascii.hexlify(sig_len), 16))
+        int_type = sigfp.read(1)
+        print('r int_type = %d' % int(binascii.hexlify(int_type), 16))
+        r_len = int(binascii.hexlify(sigfp.read(1)), 16)
+        print('r_len = %d' % r_len)
+        r = sigfp.read(r_len)
+        print('r = %s' % bytes.decode(binascii.hexlify(r)))
+        if r_len == 33:
+                r = r[1:33]
+        int_type = sigfp.read(1)
+        print('s int_type = %d' % int(binascii.hexlify(int_type), 16))
+        s_len = int(binascii.hexlify(sigfp.read(1)), 16)
+        print('s_len = %d' % s_len)
+        s = sigfp.read(s_len)
+        print('s = %s' % bytes.decode(binascii.hexlify(s)))
+        if s_len == 33:
+                s = r[1:33]
+        sighash_type = int(binascii.hexlify(sigfp.read(1)), 16)
+        print('sighash_type = %x' % sighash_type)
+        return (r, s, sighash_type)
+
 def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn_b: bytes):
         txn_sha256_b = hashlib.sha256(raw_txn_b).digest()
 
@@ -138,268 +165,359 @@ def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn_b: bytes):
                 print('invalid')
                 return 0
 
-SCRIPT_IGNORE  = 0
-SCRIPT_INVALID = -1
-SCRIPT_PASS    = 1
+def getTxnSigned(txn: bytes, sighash_type: int):
+        txn_signed_b = None
+        if sighash_type == g_script_sig_dict['SIGHASH_ALL']:
+                txn_signed_b = txn['version']
+                if 'is_segwit' in txn:
+                        txn_signed_b += b'\x00' + txn['is_segwit']
+                txn_signed_b += txn['input_count']
+                for index in range(getCount(txn['input_count'])):
+                        txn_signed_b += txn['input'][index]['prev_txn_hash']
+                        txn_signed_b += txn['input'][index]['prev_txn_out_index']
+                        txn_signed_b += txn['input'][index]['lock_script_size']
+                        txn_signed_b += txn['input'][index]['lock_script']
+                        txn_signed_b += txn['input'][index]['sequence']
+                txn_signed_b += txn['out_count']
+                for index in range(getCount(txn['out_count'])):
+                        txn_signed_b += txn['out'][index]['satoshis']
+                        txn_signed_b += txn['out'][index]['scriptpubkey_size']
+                        txn_signed_b += txn['out'][index]['scriptpubkey']
+                txn_signed_b += txn['locktime']
+                txn_signed_b += binascii.unhexlify('%08x' % g_script_sig_dict['SIGHASH_ALL'])[::-1]
+        print('txn_signed = %s' % bytes.decode(binascii.hexlify(txn_signed_b)))
+        return txn_signed_b
 
-def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, signed_txn: bytes, n_lock_time: int, n_sequence: int):
+def scriptParser(txn: dict, input_index: int):
+
+        script = txn['input'][input_index]['unlock_script'] + txn['input'][input_index]['lock_script'] 
+        script_len = getCount(txn['input'][input_index]['lock_script_size']) + getCount(txn['input'][input_index]['unlock_script_size'])
+        print('script = %s' % bytes.decode(binascii.hexlify(script)))
+        print('script_len = %d' % script_len)
+        txnfp = io.BytesIO(script)
         if_stack = []
+        stack = []
+        alt_stack = []
 
-        start = mptr.tell()
-        while mptr.tell() <= start + script_len:
-                code = int.from_bytes(mptr.read(1))
+        while txnfp.tell() < script_len:
+                code = int(binascii.hexlify(txnfp.read(1)), 16)
+                print ('code = %x' % code)
+                print('stack = %s' % stack)
                 if len(if_stack) > 0:
                         if if_stack[-1] == OP_FALSE:
-                                if code == 0x67: # OP_ELSE
+                                if code == OP_ELSE:
                                         if_stack.pop()
-                                        if_stack.push(OP_TRUE)
-                                elif code == 0x68: # OP_ENDIF
+                                        if_stack.append(OP_TRUE)
+                                elif code == OP_ENDIF:
                                         if_stack.pop()
                                 else:
                                         pass
                         else:
-                                if code == 0x67: # OP_ELSE
+                                if code == OP_ELSE:
                                         if_stack.pop()
-                                        if_stack.push(OP_FALSE)
-                                elif code == 0x68: # OP_ENDIF
+                                        if_stack.append(OP_FALSE)
+                                elif code == OP_ENDIF:
                                         if_stack.pop()
-                if code == 0x00: # OP_0, OP_FALSE
-                        stack.push(0)
+                if code == OP_0: # OP_0, OP_FALSE
+                        print ('OP_0')
+                        stack.append(0)
                 elif code <= 0x4e: # push data
-                        pushdata_op(mptr, code, stack)
-                elif code == 0x4f: # OP_1NEGATE
-                        stack.push(-1)
-                elif code == 0x51: # OP_1, OP_TRUE
-                        stack.push(1)
-                elif code <= 0x60: # OP_2-OP_16
-                        stack.push(code - 0x50)
-                elif code <= 0x61: # OP_NOP
+                        print ('pushdata')
+                        op_pushdata(txnfp, code, stack)
+                elif code == OP_1NEGATE:
+                        print ('OP_1NEGATE')
+                        stack.append(-1)
+                elif code == OP_1: # OP_1, OP_TRUE
+                        print ('OP_1')
+                        stack.append(1)
+                elif code <= OP_16: # OP_2-OP_16
+                        print ('OP_2 to OP_16')
+                        stack.append(code - 0x50)
+                elif code == OP_NOP:
+                        print ('OP_NOP')
                         pass
-                elif code <= 0x63: # OP_IF
-                        if_counter += 1
-                        if stack[-1] == False:
-                                if_stack.push(False)
+                elif code == OP_IF:
+                        print ('OP_IF')
+                        if stack[-1] == 0:
+                                if_stack.append(OP_FALSE)
                         else:
-                                if_stack.push(True)
-                elif code == 0x69: # OP_VERIFY
-                        if op_verify(stack) == False:
+                                if_stack.append(OP_TRUE)
+                elif code == OP_VERIFY:
+                        print ('OP_VERIFY')
+                        if stack[-1] == 0:
                                 return False
-                elif code == 0x6a: # OP_RETURN
-                        pushdata_op(mptr, mptr.read(1), stack)
+                elif code == OP_RETURN:
+                        print ('OP_RETURN')
+                        op_pushdata(txnfp, txnfp.read(1), stack)
                         return False
-                elif code == 0x6b: # OP_TOALTSTACK
-                        alt_stack.push(stack.pop())
-                elif code == 0x6c: # OP_FROMALTSTACK
-                        stack.push(alt_stack.pop())
-                elif code == 0x73: # OP_IFDUP
+                elif code == OP_TOALTSTACK:
+                        print ('OP_TOALTSTACK')
+                        alt_stack.append(stack.pop())
+                elif code == OP_FROMALTSTACK:
+                        print ('OP_FROMALTSTACK')
+                        stack.append(alt_stack.pop())
+                elif code == OP_IFDUP:
+                        print ('OP_IFDUP')
                         val = stack.pop()
                         if val != 0:
-                                stack.push(val)
-                                stack.push(val)
-                elif code == 0x74: # OP_DEPTH
-                        stack.push(len(stack))
-                elif code == 0x75: # OP_DROP
+                                stack.append(val)
+                                stack.append(val)
+                elif code == OP_DEPTH:
+                        print ('OP_DEPTH')
+                        stack.append(len(stack))
+                elif code == OP_DROP:
+                        print ('OP_DROP')
                         stack.pop()
-                elif code == 0x76: # OP_DUP
+                elif code == OP_DUP:
+                        print ('OP_DUP')
                         val = stack[-1]
-                        stack.push(val)
-                elif code == 0x77: # OP_NIP
+                        stack.append(val)
+                elif code == OP_NIP:
+                        print ('OP_NIP')
                         stack.pop(-2)
-                elif code == 0x78: # OP_OVER
+                elif code == OP_OVER:
+                        print ('OP_OVER')
                         val = stack[-2]
-                        stack.push(val)
-                elif code == 0x79: # OP_PICK
-                        n = int.from_bytes(mptr.read(1))
+                        stack.append(val)
+                elif code == OP_PICK:
+                        print ('OP_PICK')
+                        n = int.from_bytes(txnfp.read(1))
                         val = stack[-1 * n]
-                        stack.push(val)
-                elif code == 0x7a: # OP_ROLL
-                        n = int.from_bytes(mptr.read(1))
+                        stack.append(val)
+                elif code == OP_ROLL:
+                        print ('OP_ROLL')
+                        n = int.from_bytes(txnfp.read(1))
                         val = stack.pop(-1 * n)
-                        stack.push(val)
-                elif code == 0x7b: # OP_ROT
+                        stack.append(val)
+                elif code == OP_ROT:
+                        print ('OP_ROT')
                         val = stack.pop(-3)
-                        stack.push(val)
-                elif code == 0x7c: # OP_SWAP
+                        stack.append(val)
+                elif code == OP_SWAP:
+                        print ('OP_SWAP')
                         val = stack.pop(-2)
-                        stack.push(val)
-                elif code == 0x7d: # OP_TUCK # x1 x2
+                        stack.append(val)
+                elif code == OP_TUCK: # x1 x2
+                        print ('OP_TUCK')
                         val2 = stack.pop() # val1 = x2
                         val1 = stack.pop() # val2 = x1
-                        stack.push(val2) # x2
-                        stack.push(val1) # x2 x1
-                        stack.push(val2) # x2 x1 x2
-                elif code == 0x6d: # OP_2DROP
+                        stack.append(val2) # x2
+                        stack.append(val1) # x2 x1
+                        stack.append(val2) # x2 x1 x2
+                elif code == OP_2DROP:
+                        print ('OP_2DROP')
                         stack.pop()
                         stack.pop()
-                elif code == 0x6e: # OP_2DUP x1 x2
+                elif code == OP_2DUP: # x1 x2
+                        print ('OP_2DUP')
                         val1 = stack[-2] # x1
                         val2 = stack[-1] # x2
-                        stack.push(val1) # x1 x2 x1
-                        stack.push(val2) # x1 x2 x1 x2
-                elif code == 0x6f: # OP_3DUP x1 x2 x3
+                        stack.append(val1) # x1 x2 x1
+                        stack.append(val2) # x1 x2 x1 x2
+                elif code == OP_3DUP: # x1 x2 x3
+                        print ('OP_3DUP')
                         val1 = stack[-3] # x1
                         val2 = stack[-2] # x2
                         val2 = stack[-1] # x3
-                        stack.push(val1) # x1 x2 x3 x1
-                        stack.push(val2) # x1 x2 x3 x1 x2
-                        stack.push(val3) # x1 x2 x3 x1 x2 x3
-                elif code == 0x70: # OP_2OVER x1 x2 x3 x4
+                        stack.append(val1) # x1 x2 x3 x1
+                        stack.append(val2) # x1 x2 x3 x1 x2
+                        stack.append(val3) # x1 x2 x3 x1 x2 x3
+                elif code == OP_2OVER: # x1 x2 x3 x4
+                        print ('OP_2OVER')
                         val1 = stack[-4] # x1
                         val2 = stack[-3] # x2
-                        stack.push(val1) # x1 x2 x3 x4 x1
-                        stack.push(val2) # x1 x2 x3 x4 x1 x2
-                elif code == 0x71: # OP_2ROT x1 x2 x3 x4 x5 x6
+                        stack.append(val1) # x1 x2 x3 x4 x1
+                        stack.append(val2) # x1 x2 x3 x4 x1 x2
+                elif code == OP_2ROT: # x1 x2 x3 x4 x5 x6
+                        print ('OP_2ROT')
                         val1 = stack.pop(-6) # x1
                         val2 = stack.pop(-5) # x2
-                        stack.push(val1) # x3 x4 x5 x6 x1
-                        stack.push(val2) # x3 x4 x5 x6 x1 x2
-                elif code == 0x72: # OP_2SWAP x1 x2 x3 x4
+                        stack.append(val1) # x3 x4 x5 x6 x1
+                        stack.append(val2) # x3 x4 x5 x6 x1 x2
+                elif code == OP_2SWAP: # x1 x2 x3 x4
+                        print ('OP_2SWAP')
                         val1 = stack.pop(-4) # x1
                         val2 = stack.pop(-3) # x2
-                        stack.push(val1) # x3 x4 x1
-                        stack.push(val2) # x3 x4 x1 x2
-                elif code == 0x82: # OP_SIZE
+                        stack.append(val1) # x3 x4 x1
+                        stack.append(val2) # x3 x4 x1 x2
+                elif code == OP_SIZE:
+                        print ('OP_SIZE')
                         byte_string = stack[-1]
-                        stack.push(len(byte_string))
-                elif code == 0x87: # OP_EQUAL x1 x2
+                        stack.append(len(byte_string))
+                elif code == OP_EQUAL: # x1 x2
+                        print ('OP_EQUAL')
                         val1 = stack.pop(-2) # x1
                         val2 = stack.pop(-1) # x2
                         if val1 == val2:
-                                stack.push(1)
+                                stack.append(1)
                         else:
-                                stack.push(0)
-                elif code == 0x88: # OP_EQUALVERIFY
+                                stack.append(0)
+                elif code == OP_EQUALVERIFY: # x1 x2
+                        print ('OP_EQUALVERIFY')
                         val1 = stack.pop(-2) # x1
                         val2 = stack.pop(-1) # x2
-                        if val1 == val2:
-                                stack.push(1)
-                        else:
-                                stack.push(0)
-                        if op_verify(stack) == False:
+                        if val1 != val2:
                                 return False
-                elif code == 0x8b: # OP_1ADD
+                elif code == OP_1ADD:
+                        print ('OP_1ADD')
                         val = stack.pop()
-                        stack.push(val + 1)
-                elif code == 0x8c: # OP_1SUB
+                        stack.append(val + 1)
+                elif code == OP_1SUB:
+                        print ('OP_1SUB')
                         val = stack.pop()
-                        stack.push(val - 1)
-                elif code == 0x8f: # OP_NEGATE
+                        stack.append(val - 1)
+                elif code == OP_NEGATE:
+                        print ('OP_NEGATE')
                         val = stack.pop()
-                        stack.push(val * -1)
-                elif code == 0x90: # OP_ABS
+                        stack.append(val * -1)
+                elif code == OP_ABS:
+                        print ('OP_ABS')
                         val = stack.pop()
-                        stack.push(abs(val))
-                elif code == 0x91: # OP_NOT
+                        stack.append(abs(val))
+                elif code == OP_NOT:
+                        print ('OP_NOT')
                         val = stack.pop()
-                        stack.push(int(not val))
-                elif code == 0x92: # OP_0NOTEQUAL
+                        stack.append(int(not val))
+                elif code == OP_0NOTEQUAL:
+                        print ('OP_0NOTEQUAL')
                         val = stack.pop()
-                        stack.push(int(bool(val)))
-                elif code == 0x93: # OP_ADD
+                        stack.append(int(bool(val)))
+                elif code == OP_ADD:
+                        print ('OP_ADD')
                         val1 = stack.pop()
                         val2 = stack.pop()
-                        stack.push(val1 + val2)
-                elif code == 0x94: # OP_SUB a b
+                        stack.append(val1 + val2)
+                elif code == OP_SUB: # a b
+                        print ('OP_SUB')
                         val2 = stack.pop() # b
                         val1 = stack.pop() # a
-                        stack.push(val1 - val2) # a - b
-                elif code == 0x9a: # OP_BOOLAND
+                        stack.append(val1 - val2) # a - b
+                elif code == OP_BOOLAND:
+                        print ('OP_BOOLAND')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(bool(val1 and val2))
-                elif code == 0x9b: # OP_BOOLOR
+                        stack.append(bool(val1 and val2))
+                elif code == OP_BOOLOR:
+                        print ('OP_BOOLOR')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(bool(val1 or val2))
-                elif code == 0x9c: # OP_NUMEQUAL
+                        stack.append(bool(val1 or val2))
+                elif code == OP_NUMEQUAL:
+                        print ('OP_NUMEQUAL')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(val1 == val2)
-                elif code == 0x9d: # OP_NUMEQUALVERIFY
+                        if val1 == val2:
+                                val = 0
+                        else:
+                                val = 1
+                        stack.append(val)
+                elif code == OP_NUMEQUALVERIFY:
+                        print ('OP_NUMEQUALVERIFY')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(val1 == val2)
-                        if op_verify(stack) == False:
+                        if val1 != val2:
                                 return False
-                elif code == 0x9e: # OP_NUMNOTEQUAL
+                elif code == OP_NUMNOTEQUAL:
+                        print ('OP_NUMNOTEQUAL')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(val1 != val2)
-                elif code == 0x9f: # OP_LESSTHAN
+                        stack.append(val1 != val2)
+                elif code == OP_LESSTHAN:
+                        print ('OP_LESSTHAN')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(val1 < val2)
-                elif code == 0xa0: # OP_GREATERTHAN
+                        stack.append(val1 < val2)
+                elif code == OP_GREATERTHAN:
+                        print ('OP_GREATERTHAN')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(val1 > val2)
-                elif code == 0xa1: # OP_LESSTHANOREQUAL
+                        stack.append(val1 > val2)
+                elif code == OP_LESSTHANOREQUAL:
+                        print ('OP_LESSTHANOREQUAL')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(val1 <= val2)
-                elif code == 0xa2: # OP_GREATERTHANOREQUAL
+                        stack.append(val1 <= val2)
+                elif code == OP_GREATERTHANOREQUAL:
+                        print ('OP_GREATERTHANOREQUAL')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(val1 >= val2)
-                elif code == 0xa3: # OP_MIN
+                        stack.append(val1 >= val2)
+                elif code == OP_MIN:
+                        print ('OP_MIN')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(min(val1, val2))
-                elif code == 0xa4: # OP_MAX
+                        stack.append(min(val1, val2))
+                elif code == OP_MAX:
+                        print ('OP_MAX')
                         val2 = stack.pop()
                         val1 = stack.pop()
-                        stack.push(max(val1, val2))
-                elif code == 0xa5: # OP_WITHIN x min max
+                        stack.append(max(val1, val2))
+                elif code == OP_WITHIN: # x min max
+                        print ('OP_WITHIN')
                         maximum = stack.pop()
                         minimum = stack.pop()
                         val = stack.pop()
-                        stack.push((val >= minimum) and (val < maximum))
-                elif code == 0xa6: # OP_RIPEMD160
+                        stack.append((val >= minimum) and (val < maximum))
+                elif code == OP_RIPEMD160:
+                        print ('OP_RIPEMD160')
                         pubkeyhash = stack.pop()
                         h = hashlib.new('ripemd160')
                         h.update(pubkeyhash)
                         ripemd160_hash = h.digest()
-                        stack.push(ripemd160_hash)
-                elif code == 0xa7: # OP_SHA1
+                        stack.append(ripemd160_hash)
+                elif code == OP_SHA1:
+                        print ('OP_SHA1')
                         bstr = stack.pop()
-                        stack.push(hashlib.sha1(bstr).digest())
-                elif code == 0xa8: # OP_SHA256
+                        stack.append(hashlib.sha1(bstr).digest())
+                elif code == OP_SHA256:
+                        print ('OP_SHA256')
                         bstr = stack.pop()
-                        stack.push(hashlib.sha256(bstr).digest())
-                elif code == 0xa9: # OP_HASH160
+                        stack.append(hashlib.sha256(bstr).digest())
+                elif code == OP_HASH160:
+                        print ('OP_HASH160')
                         pubkey = stack.pop()
                         pubkeyhash = hashlib.sha256(pubkey).digest()
                         h = hashlib.new('ripemd160')
                         h.update(pubkeyhash)
                         pubkey_hash160 = h.digest()
-                        stack.push(pubkey_hash160)
-                elif code == 0xaa: # OP_HASH256
+                        stack.append(pubkey_hash160)
+                elif code == OP_HASH256:
+                        print ('OP_HASH256')
                         pubkey = stack.pop()
                         pubkey_hash256 = hash256(pubkey)
-                        stack.push(pubkey_hash256)
-                elif code == 0xac: # OP_CODESEPARATOR 
+                        stack.append(pubkey_hash256)
+                elif code == OP_CODESEPARATOR:
+                        print ('OP_CODESEPARATOR')
                         return False # we won't process this as this was widthrawn early in bitcoin
-                elif code == 0xac: # OP_CHECKSIG sig pubkey
+                elif code == OP_CHECKSIG: # sig pubkey
+                        print ('OP_CHECKSIG')
                         pubkey_b = stack.pop()
-                        sig_b = stack.pop()
-                        is_valid = sigcheck(sig_b, pubkey_b, signed_txn)
-                        stack.push(is_valid)
-                elif code == 0xad: # OP_CHECKSIGVERIFY
+                        complete_sig_b = stack.pop()
+                        r, s, sighash_type = splitSig(complete_sig_b)
+                        txn_signed_b =  getTxnSigned(txn, sighash_type)
+                        sig_b = r + s
+                        is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
+                        stack.append(is_valid)
+                elif code == OP_CHECKSIGVERIFY:
+                        print ('OP_CHECKSIGVERIFY')
                         pubkey_b = stack.pop()
                         sig_b = stack.pop() # this is R, S and sig_type
-                        is_valid = sigcheck(sig_b, pubkey_b, signed_txn)
-                        stack.push(is_valid)
-                        if op_verify(stack) == False:
+                        r, s, sighash_type = splitSig(complete_sig_b)
+                        txn_signed_b =  getTxnSigned(txn, sighash_type)
+                        sig_b = r + s
+                        is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
+                        if is_valid == 0:
                                 return False
-                elif code == 0xae: # OP_CHECKMULTISIG <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIG>
-                        pubkey_count = stack.pop() - OP_0
+                elif code == OP_CHECKMULTISIG: # <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIG>
+                        print ('OP_CHECKMULTISIG')
+                        pubkey_count = stack.pop()
                         pubkey_array = [stack.pop() for index in range(pubkey_count)][::-1]
-                        min_valid_sig_count = stack.pop() - OP_0
+                        min_valid_sig_count = stack.pop()
                         sig_array = []
                         remaining_valid_sig = min_valid_sig_count
                         while True:
                                 sig_b = stack.pop()
-                                if sig_b == OP_0:
+                                if sig_b == 0:
                                         sig_array = sig_array[::-1]
                                         break;
                                 sig_array.append(sig_b)
@@ -407,6 +525,9 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         is_valid = 0
                         for pubkey_b in pubkey_array:
                                 sig_b = sig_array[sig_index]
+                                r, s, sighash_type = splitSig(complete_sig_b)
+                                txn_signed_b =  getTxnSigned(txn, sighash_type)
+                                sig_b = r + s
                                 is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
                                 if is_valid_sig == 1:
                                         remaining_valid_sig -= 1
@@ -414,16 +535,17 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                                                 is_valid = 1
                                                 break
                                         continue
-                        stack.push(is_valid)
-                elif code == 0xaf: # OP_CHECKMULTISIGVERIFY <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIGVERIFY>
-                        pubkey_count = stack.pop() - OP_0
+                        stack.append(is_valid)
+                elif code == OP_CHECKMULTISIGVERIFY: # <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIGVERIFY>
+                        print ('OP_CHECKMULTISIGVERIFY')
+                        pubkey_count = stack.pop()
                         pubkey_array = [stack.pop() for index in range(pubkey_count)][::-1]
-                        min_valid_sig_count = stack.pop() - OP_0
+                        min_valid_sig_count = stack.pop()
                         sig_array = []
-                        remaining_valid_sig = min_valiv_sig_count
+                        remaining_valid_sig = min_valid_sig_count
                         while True:
                                 sig_b = stack.pop()
-                                if sig_b == OP_0:
+                                if sig_b == 0:
                                         sig_array = sig_array[::-1]
                                         break;
                                 sig_array.append(sig_b)
@@ -431,6 +553,9 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                         is_valid = 0
                         for pubkey_b in pubkey_array:
                                 sig_b = sig_array[sig_index]
+                                r, s, sighash_type = splitSig(complete_sig_b)
+                                txn_signed_b =  getTxnSigned(txn, sighash_type)
+                                sig_b = r + s
                                 is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
                                 if is_valid_sig == 1:
                                         remaining_valid_sig -= 1
@@ -438,27 +563,24 @@ def scriptParser(mptr: mmap, script_len: int, stack: list, alt_stack: list, sign
                                                 is_valid = 1
                                                 break
                                         continue
-                        stack.push(is_valid)
-                        if op_verify(stack) == False:
+                        if is_valid == 0:
                                 return False
-                elif code == 0xb1: # OP_CHECKLOCKTIMEVERIFY TODO
+                elif code == OP_CHECKLOCKTIMEVERIFY: # TODO
+                        print ('OP_CHECKLOCKTIMEVERIFY')
                         if len(stack) == 0:
                                 return False
                         val = int(binascii.hexlify(stack.pop()[::-1]), 16)
                         if val > n_lock_time or val < 0 or n_sequence == 0xffffffff:
                                 return False
-                elif code == 0xb2: # OP_CHECKSEQUENCEVERIFY TODO
+                elif code == OP_CHECKSEQUENCEVERIFY: # TODO
+                        print ('OP_CHECKSEQUENCEVERIFY')
                         val = int(binascii.hexlify(stack.pop()[::-1]), 16)
                         if val < n_lock_time:
                                 return False
                 else: # Any non assigned opcode
                         return False
 
-        mptr.read(script_len)
-        
-
-def scriptPubkeyParser(scriptPubKey: str, txn: bytes):
-        pass
+        return stack.pop()
 
 def convertPKHToAddress(prefix, addr):
     data = prefix + addr
@@ -472,92 +594,142 @@ def pubkeyToAddress(pubkey_hex):
         pubkey_hash = h.digest()
         return convertPKHToAddress(b'\x00', pubkey_hash)
 
-def getSignedTxn(sig_type: bytes):
+# returns (lock script, lock script size and satoshis)
+def get_prev_txn_info(prev_txn_hash_bigendian: str, prev_txn_out_index: int):
+        global g_block_header_size
+        block_file_number, block_offset, txn_offset = ldb.getTxnOffset(prev_txn_hash_bigendian)
+        print('block_file_number = %d, block_offset = %d, txn_offset = %d' % (block_file_number, block_offset, txn_offset))
+
+        blocks_path = os.path.join(os.getenv('HOME'), '.bitcoin', 'blocks')
+        block_filepath = os.path.join(blocks_path, 'blk%05d.dat' % block_file_number)
+
+        with open(block_filepath, 'rb') as block_file:
+                txnfp = mmap.mmap(block_file.fileno(), 0, prot=mmap.PROT_READ) #File is open read-only
+
+                txnfp.seek(block_offset + g_block_header_size + txn_offset)
+
+        #        prev_raw_txn = rpc_connection.getrawtransaction(prev_txn_hash)
+        #        print('Previous Raw Transaction = %s' % prev_raw_txn)
+        #        txnfp = io.BytesIO(binascii.unhexlify(prev_raw_txn))
+                skip_txn_version = txnfp.read(4)
+                # check input count
+                txnfp_read = getCountBytes(txnfp)
+                input_count = getCount(txnfp_read)
+                if input_count == 0:
+                        skip_is_segwit = txnfp.read(1)
+                        txnfp_read = getCountBytes(txnfp)
+                        input_count = getCount(txnfp_read)
+                else:
+                        input_count = input_count
+                # skip all inputs
+                for index in range(input_count):
+                        skip_prev_txn = txnfp.read(32+4)
+                        txnfp_read = getCountBytes(txnfp)
+                        skip_script_size = getCount(txnfp_read)
+                        skip_script = txnfp.read(skip_script_size)
+                        skip_sequence = txnfp.read(4)
+
+                txnfp_read = getCountBytes(txnfp)
+                out_count = getCount(txnfp_read)
+
+                # skip all but required out
+                for index in range(out_count):
+                        if index != prev_txn_out_index:
+                                skip_satoshi = txnfp.read(8)
+                                skip_script_size = int(binascii.hexlify(txnfp.read(1)), 16)
+                                skip_script = txnfp.read(skip_script_size)
+                        satoshis = int(binascii.hexlify(txnfp.read(8)[::-1]), 16)
+                        lock_script_size_b = getCountBytes(txnfp)
+                        lock_script_size = getCount(lock_script_size_b)
+                        lock_script = txnfp.read(lock_script_size)
+                        break
+        return (lock_script, lock_script_size_b, satoshis)
 
 def unlockTxn(mptr: mmap):
+        start = mptr
         txn = {}
-        mptr_read = mptr.read(4)
-        raw_txn_for_sign = mptr_read
-        txn_version = mptr_read
-        mptr_read = getCountBytes(mptr)
-        input_count = getCount(mptr_read)
+        txn['version'] = mptr.read(4) # version
+        print('txn version = %s' % bytes.decode(binascii.hexlify(txn['version'][::-1])))
+
+        txn['input_count'] = getCountBytes(mptr)
+        input_count = getCount(txn['input_count'])
         if input_count == 0:
                 # post segwit
-                is_segwit = mptr.read(1)
-                mptr_read = getCountBytes(mptr)
-                input_count = getCount(mptr_read)
-        else:
-                input_count = input_count
-        raw_txn_for_sign += mptr_read
+                txn['is_segwit'] = mptr.read(1)
+                txn['input_count'] = getCountBytes(mptr)
+                input_count = getCount(txn['input_count'])
+
+        print('input count = %s' % input_count)
+
+        txn['input'] = []
         for index in range(input_count):
-                stack = []
-                alt_stack = []
                 txn_input = {}
-                mptr_read = mptr.read(32)
-                raw_txn_for_sign += mptr_read
-                prev_txn_hash = bytes.decode(binascii.hexlify(mptr_read[::-1]))
-                mptr_read = mptr.read(4)
-                raw_txn_for_sign += mptr_read
-                prev_txn_out_index = int(binascii.hexlify(mptr_read[::-1]), 16)
-                mptr_read = getCountBytes(mptr)
-                scriptsig_size = getCount(mptr_read)
-                unlocking_script['size'] = txn_input['scriptsig_size']
-                unlocking_script['script_loc'] = mptr.tell()
-                unlocking_script['satoshis'] = getSatoshis(txn_input['prev_txn_hash'], txn_input['prev_txn_out_index'])
-                unlocking_script['stack'] = []
-#                mptr_read = getCountBytes(mptr)
-#                txn_input['scriptsig_size'] = getCount(mptr_read)
-#                mptr_read = mptr.read(txn_input['scriptsig_size'])
-#                txn_input['scriptsig'] = bytes.decode(binascii.hexlify(mptr_read))
-                mptr_read = mptr.read(4)
-                raw_txn_for_sign += mptr_read
-                n_sequence = int(binascii.hexlify(mptr_read[::-1]), 16)
-                parsed_sig = scriptParser(mptr, txn_input['scriptsig_size'], stack, alt_stack, signed_txn, n_lock_time, n_sequence)
-        mptr_read = getCountBytes(mptr)
-        out_count = getCount(mptr_read)
-        out = []
+                txn_input['prev_txn_hash'] = mptr.read(32)
+                txn_input['prev_txn_out_index'] = mptr.read(4)
+
+                prev_txn_hash = bytes.decode(binascii.hexlify(txn_input['prev_txn_hash'][::-1]))
+                prev_txn_out_index = int(binascii.hexlify(txn_input['prev_txn_out_index'][::-1]), 16)
+
+                print('prev txn hash = %s, out index = %d' % (prev_txn_hash, prev_txn_out_index))
+
+                txn_input['unlock_script_size'] = getCountBytes(mptr)
+                unlock_script_size = getCount(txn_input['unlock_script_size'])
+                txn_input['unlock_script'] = mptr.read(unlock_script_size)
+                txn_input['lock_script'], txn_input['lock_script_size'], txn_input['satoshis'] = get_prev_txn_info(txn_input['prev_txn_hash'], prev_txn_out_index)
+                print('lock_script = %s, lock_script_size = %d, satoshis = %d' % (bytes.decode(binascii.hexlify(txn_input['lock_script'])), getCount(txn_input['lock_script_size']), txn_input['satoshis']))
+                txn_input['sequence'] = mptr.read(4)
+                txn['input'].append(txn_input)
+        txn['out_count'] = getCountBytes(mptr)
+        out_count = getCount(txn['out_count'])
+        txn['out'] = []
         for index in range(out_count):
                 txn_out = {}
-                mptr_read = mptr.read(8)
-                satoshis = int(binascii.hexlify(mptr_read[::-1]), 16)
-                mptr_read = getCountBytes(mptr)
-                txn_out['scriptpubkey_size'] = getCount(mptr_read)
-                mptr_read = mptr.read(txn_out['scriptpubkey_size'])
-                txn_out['scriptpubkey'] = bytes.decode(binascii.hexlify(mptr_read))
+                txn_out['satoshis'] = mptr.read(8)
+#                satoshis = int(binascii.hexlify(txn_out['satoshis'][::-1]), 16)
+                txn_out['scriptpubkey_size'] = getCountBytes(mptr)
+                scriptpubkey_size = getCount(txn_out['scriptpubkey_size'])
+                txn_out['scriptpubkey'] = mptr.read(scriptpubkey_size)
                 txn['out'].append(txn_out)
         if 'is_segwit' in txn and txn['is_segwit'] == True:
-                for index in range(txn['input_count']):
-                        mptr_read = getCountBytes(mptr)
-                        txn['input'][index]['witness_count'] = getCount(mptr_read)
+                for index in range(input_count):
+                        txn['input'][index]['witness_count'] = getCountBytes(mptr)
+                        witness_count = getCount(txn['input'][index]['witness_count'])
                         txn['input'][index]['witness'] = []
-                        for inner_index in range(txn['input'][index]['witness_count']):
+                        for inner_index in range(getCount(txn['input'][index]['witness_count'])):
                                 txn_witness = {}
-                                mptr_read = getCountBytes(mptr)
-                                txn_witness['size'] = getCount(mptr_read)
-                                txn_witness['witness'] = bytes.decode(binascii.hexlify(mptr.read(txn_witness['size'])))
+                                txn_witness['size'] = getCountBytes(mptr)
+                                witness_size = getCount(txn_witness['size'])
+                                txn_witness['witness'] = bytes.decode(binascii.hexlify(mptr.read(witness_size)))
                                 txn['input'][index]['witness'].append(txn_witness)
-        mptr_read = mptr.read(4)
-        raw_txn += mptr_read
-        txn['locktime'] = int(binascii.hexlify(mptr_read[::-1]), 16)
-        txn['txn_hash'] = getTxnHash(raw_txn)
+        txn['locktime'] = mptr.read(4)
+        input_satoshis = sum(txn_input['satoshis'] for txn_input in txn['input'])
+        out_satoshis = sum(int(binascii.hexlify(txn_out['satoshis'][::-1]), 16) for txn_out in txn['out'])
+        print('Network fees = %d' % (input_satoshis - out_satoshis))
+        for index in range(input_count):
+                status = scriptParser(txn, index)
+                if status == False:
+                        print('Invalid Transaction')
+                        return False
+        return True
 
-        logging.debug(json.dumps(txn, indent=4))
-        logging.debug('raw_txn_str = %s' % bytes.decode(binascii.hexlify(raw_txn)))
-        logging.debug('raw_txn_b = %s' % raw_txn)
-
-#        check_raw_txn = rpc_connection.getrawtransaction(txn['txn_hash'])
-#        logging.debug('blockfile index = %d' % g_blockfile_index)
-#        logging.debug('block index = %d' % g_block_index)
-#        logging.debug('txn index = %d' % g_txn_index)
-#        logging.debug('block_header_hash = %s' % g_block_header_hash)
-#        logging.debug('checked raw txn = %s' % check_raw_txn)
-#        logging.debug('txn_hash = %s' % txn['txn_hash'])
-#        logging.debug('raw_txn = %s' % bytes.decode(binascii.hexlify(raw_txn)))
-        return txn
+g_block_header_size = 80
 
 if __name__ == '__main__':
-        raw_txn = binascii.unhexlify(raw_txn_str)
-        mem_size = len(raw_txn) + 1
-        with mmap.mmap(-1, memsize) as mm:
-                mm.write(raw_txn)
-                unlockTxn(mm)
+        txn_hash_bigendian = binascii.unhexlify(txn_hash)[::-1]
+        block_file_number, block_offset, txn_offset = ldb.getTxnOffset(txn_hash_bigendian)
+        print('block_file_number = %d, block_offset = %d, txn_offset = %d' % (block_file_number, block_offset, txn_offset))
+
+        blocks_path = os.path.join(os.getenv('HOME'), '.bitcoin', 'blocks')
+        block_filepath = os.path.join(blocks_path, 'blk%05d.dat' % block_file_number)
+
+        with open(block_filepath, 'rb') as block_file:
+                mptr = mmap.mmap(block_file.fileno(), 0, prot=mmap.PROT_READ) #File is open read-only
+
+                mptr.seek(block_offset + g_block_header_size + txn_offset)
+#                print(bytes.decode(binascii.hexlify(mptr.read(1000))))
+#                print(raw_txn_str)
+                isValid = unlockTxn(mptr)
+                if isValid == False:
+                        print('Invalid Transaction')
+                else:
+                        print('Valid Transaction')

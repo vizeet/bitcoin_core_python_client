@@ -22,11 +22,9 @@ def traverse_blockchain_in_reverse():
                 with open(block_filepath, 'rb') as block_file:
                         # load file to memory
                         mptr = mmap.mmap(block_file.fileno(), 0, prot=mmap.PROT_READ) #File is open read-only
-                        mptr.seek(start)
-#                        block = getBlock(mptr, start)
-#                        print('magic number = %s' % (block['block_pre_header']['magic_number']))
-                        block_header = getBlockHeader(mptr)
-                        next_block_hash = block_header['prev_block_hash']
+                        block = getBlock(mptr, start - 8)
+                        print('magic number = %s' % (block['block_pre_header']['magic_number']))
+                        next_block_hash = block['block_header']['prev_block_hash']
                         print('next block hash = %s, n_file = %d, height = %d' % (next_block_hash, jsonobj['n_file'], jsonobj['height']))
                         next_block_hash_bigendian_b = binascii.unhexlify(next_block_hash)[::-1]
                 if jsonobj['height'] == 1:
