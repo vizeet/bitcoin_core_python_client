@@ -94,6 +94,7 @@ def getBlockHeader(mptr: mmap):
         block_header['bits'] = bytes.decode(binascii.hexlify(mptr.read(4)[::-1]))
         block_header['nounce'] = bytes.decode(binascii.hexlify(mptr.read(4)[::-1]))
         
+        print('block_header = %s' % block_header)
         return block_header
 
 def getTransactionCount(mptr: mmap):

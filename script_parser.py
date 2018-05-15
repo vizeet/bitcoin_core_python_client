@@ -7,12 +7,18 @@ from opcode_declarations import * # OPCODE to value assignment such as OP_TRUE =
 import io
 import mmap
 import os
+from blockfile_parser import getTransactionCount, getCoinbaseTransaction, getBlockHeader
+from leveldb_parser import getBlockIndex
+import json
 
 #rpc_connection = AuthServiceProxy("http://%s:%s@127.0.0.1:8332"%('alice', 'passw0rd'))
 
-raw_txn_str = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198beed7b440999000000004a493046022100c0f693e024f966dc5f834324baa38426bba05460a2b3f9920989d38322176460022100c523a3aa62da26db1fc1902a93741dce3489629df18be11ba68ff9586041821601ffffffff0100f2052a010000001976a9148773ec867e322378e216eefe55bfcede5263059b88ac00000000'
+#raw_txn_str = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198beed7b440999000000004a493046022100c0f693e024f966dc5f834324baa38426bba05460a2b3f9920989d38322176460022100c523a3aa62da26db1fc1902a93741dce3489629df18be11ba68ff9586041821601ffffffff0100f2052a010000001976a9148773ec867e322378e216eefe55bfcede5263059b88ac00000000'
 #raw_txn_str = '01000000017f950ab790838e0c05e79856d25d586823fe139e1807405a3f207ff33f9b7663010000006b483045022100d8629403cd3b49950da9293653c6279149c029e6b7b15371342d0d2ce286c8f2022078787985a644e94fd9246f6c25733336c94af5f00d9d34a07dc2f9e0987ef990012102b726d7eae11a6d5cf3b2362e773e116a6140347dcee1b2943f4a2897351e5d90ffffffff021bf03c000000000017a91469f3757380a56820abc7052867216599e575cddd8777c1ca1c000000001976a914d5f950abe0b559b2b7a7ab3d18a507ea1c3e4ac688ac00000000'
-txn_hash = '4269fdc239d027922dcec96f1ae283dbaff10e2d1bd49605661d091e79714956'
+#txn_hash = '4269fdc239d027922dcec96f1ae283dbaff10e2d1bd49605661d091e79714956'
+txn_hash = '8ca45aed169b0434ad5a117804cdf6eec715208d57f13396c0ba18fb5a327e30'
+block_hash = '0000000000000000009a8aa7b36b0e37a28bf98956097b7b844e172692e604e1'
+
 
 g_script_command_info = {}
 
@@ -74,12 +80,12 @@ def getSigFromStack(mptr: io.BytesIO):
                 r_size = int.from_bytes(mptr.read(1))
                 if r_size == 0x21:
                         mptr.read(1)
-                r = mptr.read(0x20)
+                r = mptr.read(r_size)
                 s_type = int.from_bytes(mptr.read(1)) # this is always 2 and signifies int type
                 s_size = int.from_bytes(mptr.read(1))
                 if s_size == 0x21:
                         mptr.read(1)
-                s = mptr.read(0x20)
+                s = mptr.read(s_size)
                 sighash_type = mptr.read(1)
                 sig = r + s + sighash_type
         return sig
@@ -87,16 +93,15 @@ def getSigFromStack(mptr: io.BytesIO):
 def op_pushdata(mptr: io.BytesIO, code: int, stack: list):
         if code <= 0x4b: # push data
                 size = code
-                stack.append(mptr.read(size))
         elif code == OP_PUSHDATA1: # OP_PUSHDATA1
-                size = int.from_bytes(mptr.read(1))
-                stack.append(mptr.read(size))
+                size = int.from_bytes(mptr.read(1), byteorder='big')
         elif code == OP_PUSHDATA2: # OP_PUSHDATA2
                 size = int.from_bytes(mptr.read(2), byteorder='big')
-                stack.append(mptr.read(size))
         elif code == OP_PUSHDATA4: # OP_PUSHDATA4
                 size = int.from_bytes(mptr.read(4), byteorder='big')
-                stack.append(mptr.read(size))
+        mptr_read = mptr.read(size)
+        print('size = %d, data = %s' % (size, bytes.decode(binascii.hexlify(mptr_read))))
+        stack.append(mptr_read)
 
 def hash256(bstr):
     return hashlib.sha256(hashlib.sha256(bstr).digest()).digest()
@@ -131,17 +136,21 @@ def splitSig(complete_sig: bytes):
         r_len = int(binascii.hexlify(sigfp.read(1)), 16)
         print('r_len = %d' % r_len)
         r = sigfp.read(r_len)
-        print('r = %s' % bytes.decode(binascii.hexlify(r)))
         if r_len == 33:
                 r = r[1:33]
+        elif r_len < 32:
+                r = bytes(32 - r_len) + r
+        print('r = %s' % bytes.decode(binascii.hexlify(r)))
         int_type = sigfp.read(1)
         print('s int_type = %d' % int(binascii.hexlify(int_type), 16))
         s_len = int(binascii.hexlify(sigfp.read(1)), 16)
         print('s_len = %d' % s_len)
         s = sigfp.read(s_len)
-        print('s = %s' % bytes.decode(binascii.hexlify(s)))
         if s_len == 33:
-                s = r[1:33]
+                s = s[1:33]
+        elif s_len < 32:
+                s = bytes(32 - s_len) + s
+        print('s = %s' % bytes.decode(binascii.hexlify(s)))
         sighash_type = int(binascii.hexlify(sigfp.read(1)), 16)
         print('sighash_type = %x' % sighash_type)
         return (r, s, sighash_type)
@@ -165,7 +174,7 @@ def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn_b: bytes):
                 print('invalid')
                 return 0
 
-def getTxnSigned(txn: bytes, sighash_type: int):
+def getTxnSigned(txn: bytes, sighash_type: int, input_index: int):
         txn_signed_b = None
         if sighash_type == g_script_sig_dict['SIGHASH_ALL']:
                 txn_signed_b = txn['version']
@@ -175,8 +184,11 @@ def getTxnSigned(txn: bytes, sighash_type: int):
                 for index in range(getCount(txn['input_count'])):
                         txn_signed_b += txn['input'][index]['prev_txn_hash']
                         txn_signed_b += txn['input'][index]['prev_txn_out_index']
-                        txn_signed_b += txn['input'][index]['lock_script_size']
-                        txn_signed_b += txn['input'][index]['lock_script']
+                        if input_index == index:
+                                txn_signed_b += txn['input'][index]['lock_script_size']
+                                txn_signed_b += txn['input'][index]['lock_script']
+                        else:
+                                txn_signed_b += b'\x00'
                         txn_signed_b += txn['input'][index]['sequence']
                 txn_signed_b += txn['out_count']
                 for index in range(getCount(txn['out_count'])):
@@ -494,7 +506,7 @@ def scriptParser(txn: dict, input_index: int):
                         pubkey_b = stack.pop()
                         complete_sig_b = stack.pop()
                         r, s, sighash_type = splitSig(complete_sig_b)
-                        txn_signed_b =  getTxnSigned(txn, sighash_type)
+                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index)
                         sig_b = r + s
                         is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
                         stack.append(is_valid)
@@ -503,7 +515,7 @@ def scriptParser(txn: dict, input_index: int):
                         pubkey_b = stack.pop()
                         sig_b = stack.pop() # this is R, S and sig_type
                         r, s, sighash_type = splitSig(complete_sig_b)
-                        txn_signed_b =  getTxnSigned(txn, sighash_type)
+                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index)
                         sig_b = r + s
                         is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
                         if is_valid == 0:
@@ -526,7 +538,7 @@ def scriptParser(txn: dict, input_index: int):
                         for pubkey_b in pubkey_array:
                                 sig_b = sig_array[sig_index]
                                 r, s, sighash_type = splitSig(complete_sig_b)
-                                txn_signed_b =  getTxnSigned(txn, sighash_type)
+                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index)
                                 sig_b = r + s
                                 is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
                                 if is_valid_sig == 1:
@@ -554,7 +566,7 @@ def scriptParser(txn: dict, input_index: int):
                         for pubkey_b in pubkey_array:
                                 sig_b = sig_array[sig_index]
                                 r, s, sighash_type = splitSig(complete_sig_b)
-                                txn_signed_b =  getTxnSigned(txn, sighash_type)
+                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index)
                                 sig_b = r + s
                                 is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
                                 if is_valid_sig == 1:
@@ -634,10 +646,12 @@ def get_prev_txn_info(prev_txn_hash_bigendian: str, prev_txn_out_index: int):
 
                 # skip all but required out
                 for index in range(out_count):
+                        print ('prev_txn_out_index = %d, out_count = %d' % (prev_txn_out_index, out_count))
                         if index != prev_txn_out_index:
                                 skip_satoshi = txnfp.read(8)
                                 skip_script_size = int(binascii.hexlify(txnfp.read(1)), 16)
                                 skip_script = txnfp.read(skip_script_size)
+                                continue
                         satoshis = int(binascii.hexlify(txnfp.read(8)[::-1]), 16)
                         lock_script_size_b = getCountBytes(txnfp)
                         lock_script_size = getCount(lock_script_size_b)
@@ -714,6 +728,40 @@ def unlockTxn(mptr: mmap):
 
 g_block_header_size = 80
 
+def validate_all_transactions_of_block(block_hash_bigendian_b: bytes):
+        jsonobj = getBlockIndex(block_hash_bigendian_b)
+#                print('n_file = %d' % jsonobj['n_file'])
+        print('block index = %s' % json.dumps(jsonobj))
+        if 'data_pos' in jsonobj:
+                block_filepath = os.path.join(blocks_path, 'blk%05d.dat' % jsonobj['n_file'])
+                start = jsonobj['data_pos']
+        elif 'undo_pos' in jsonobj:
+                block_filepath = os.path.join(blocks_path, 'rev%05d.dat' % jsonobj['n_file'])
+                start = jsonobj['undo_pos']
+
+        with open(block_filepath, 'rb') as block_file:
+                # load file to memory
+                mptr = mmap.mmap(block_file.fileno(), 0, prot=mmap.PROT_READ) #File is open read-only
+#                skip_block_header = mptr.read(g_block_header_size)
+                mptr.seek(start)
+                getBlockHeader(mptr)
+                txn_count = getTransactionCount(mptr)
+                print('txn_count = %d' % txn_count)
+                skip_coinbase_txn = getCoinbaseTransaction(mptr)
+                for index in range(1, txn_count):
+                        print('XXXXXXXXXXXXXXXX txn index = %d' % index)
+                        isValid = unlockTxn(mptr)
+                        if isValid == False:
+                                print('Invalid Transaction')
+                                exit()
+                        else:
+                                print('Valid Transaction')
+#                block = getBlock(mptr, start - 8)
+#                print('magic number = %s' % (block['block_pre_header']['magic_number']))
+#                next_block_hash = block['block_header']['prev_block_hash']
+#                print('next block hash = %s, n_file = %d, height = %d' % (next_block_hash, jsonobj['n_file'], jsonobj['height']))
+#                next_block_hash_bigendian_b = binascii.unhexlify(next_block_hash)[::-1]
+
 if __name__ == '__main__':
         txn_hash_bigendian = binascii.unhexlify(txn_hash)[::-1]
         block_file_number, block_offset, txn_offset = ldb.getTxnOffset(txn_hash_bigendian)
@@ -733,3 +781,6 @@ if __name__ == '__main__':
                         print('Invalid Transaction')
                 else:
                         print('Valid Transaction')
+
+        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
+        validate_all_transactions_of_block(block_hash_bigendian_b)
