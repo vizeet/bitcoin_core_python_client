@@ -16,7 +16,9 @@ import json
 #raw_txn_str = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198beed7b440999000000004a493046022100c0f693e024f966dc5f834324baa38426bba05460a2b3f9920989d38322176460022100c523a3aa62da26db1fc1902a93741dce3489629df18be11ba68ff9586041821601ffffffff0100f2052a010000001976a9148773ec867e322378e216eefe55bfcede5263059b88ac00000000'
 #raw_txn_str = '01000000017f950ab790838e0c05e79856d25d586823fe139e1807405a3f207ff33f9b7663010000006b483045022100d8629403cd3b49950da9293653c6279149c029e6b7b15371342d0d2ce286c8f2022078787985a644e94fd9246f6c25733336c94af5f00d9d34a07dc2f9e0987ef990012102b726d7eae11a6d5cf3b2362e773e116a6140347dcee1b2943f4a2897351e5d90ffffffff021bf03c000000000017a91469f3757380a56820abc7052867216599e575cddd8777c1ca1c000000001976a914d5f950abe0b559b2b7a7ab3d18a507ea1c3e4ac688ac00000000'
 #txn_hash = '4269fdc239d027922dcec96f1ae283dbaff10e2d1bd49605661d091e79714956'
-txn_hash = '8ca45aed169b0434ad5a117804cdf6eec715208d57f13396c0ba18fb5a327e30'
+#txn_hash = '8ca45aed169b0434ad5a117804cdf6eec715208d57f13396c0ba18fb5a327e30' # P2PKH
+#txn_hash = '40eee3ae1760e3a8532263678cdf64569e6ad06abc133af64f735e52562bccc8'
+txn_hash = '7edb32d4ffd7a385b763c7a8e56b6358bcd729e747290624e18acdbe6209fc45' # P2SH
 block_hash = '0000000000000000009a8aa7b36b0e37a28bf98956097b7b844e172692e604e1'
 
 
@@ -592,6 +594,11 @@ def scriptParser(txn: dict, input_index: int):
                 else: # Any non assigned opcode
                         return False
 
+        print('stack = %s' % stack)
+        for item in stack:
+                if type(item) == bytes:
+                        print('stack item = %s' % bytes.decode(binascii.hexlify(item)))
+
         return stack.pop()
 
 def convertPKHToAddress(prefix, addr):
@@ -721,10 +728,11 @@ def unlockTxn(mptr: mmap):
         print('Network fees = %d' % (input_satoshis - out_satoshis))
         for index in range(input_count):
                 status = scriptParser(txn, index)
+                print ('status = %s' % status)
                 if status == False:
                         print('Invalid Transaction')
-                        return False
-        return True
+                        return (False, 0)
+        return (True, input_satoshis - out_satoshis)
 
 g_block_header_size = 80
 
@@ -747,20 +755,19 @@ def validate_all_transactions_of_block(block_hash_bigendian_b: bytes):
                 getBlockHeader(mptr)
                 txn_count = getTransactionCount(mptr)
                 print('txn_count = %d' % txn_count)
-                skip_coinbase_txn = getCoinbaseTransaction(mptr)
+                coinbase_txn = getCoinbaseTransaction(mptr)
+                net_fees = 0
                 for index in range(1, txn_count):
                         print('XXXXXXXXXXXXXXXX txn index = %d' % index)
-                        isValid = unlockTxn(mptr)
+                        isValid, satoshis = unlockTxn(mptr)
                         if isValid == False:
                                 print('Invalid Transaction')
                                 exit()
                         else:
                                 print('Valid Transaction')
-#                block = getBlock(mptr, start - 8)
-#                print('magic number = %s' % (block['block_pre_header']['magic_number']))
-#                next_block_hash = block['block_header']['prev_block_hash']
-#                print('next block hash = %s, n_file = %d, height = %d' % (next_block_hash, jsonobj['n_file'], jsonobj['height']))
-#                next_block_hash_bigendian_b = binascii.unhexlify(next_block_hash)[::-1]
+                        net_fees += satoshis
+                print('mining reward = %.8f' % (sum(out['satoshis'] for out in coinbase_txn['out']) / 100000000.0))
+                print('net_fees = %.8f' % (net_fees / 100000000.0))
 
 if __name__ == '__main__':
         txn_hash_bigendian = binascii.unhexlify(txn_hash)[::-1]
@@ -774,13 +781,11 @@ if __name__ == '__main__':
                 mptr = mmap.mmap(block_file.fileno(), 0, prot=mmap.PROT_READ) #File is open read-only
 
                 mptr.seek(block_offset + g_block_header_size + txn_offset)
-#                print(bytes.decode(binascii.hexlify(mptr.read(1000))))
-#                print(raw_txn_str)
                 isValid = unlockTxn(mptr)
                 if isValid == False:
                         print('Invalid Transaction')
                 else:
                         print('Valid Transaction')
 
-        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
-        validate_all_transactions_of_block(block_hash_bigendian_b)
+#        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
+#        validate_all_transactions_of_block(block_hash_bigendian_b)

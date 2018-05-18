@@ -4,7 +4,7 @@ import json
 import datetime
 import pandas as pd
 
-myaddress = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+myaddress = input('Enter Bitcoin Address: ')
 
 btcval = 100000000.0 # in santoshis
 
@@ -205,7 +205,7 @@ def getCurrentBuyPriceInInr():
         getreq.perform()
         getreq.close()
 
-        current_buy_rate_in_inr = json.loads(strbuf.getvalue())['buy']
+        current_buy_rate_in_inr = int(json.loads(strbuf.getvalue())['buy'])
 
         return current_buy_rate_in_inr
 
@@ -218,7 +218,7 @@ def getCurrentSellPriceInInr():
         getreq.perform()
         getreq.close()
 
-        current_buy_rate_in_inr = json.loads(strbuf.getvalue())['sell']
+        current_buy_rate_in_inr = int(json.loads(strbuf.getvalue())['sell'])
 
         return current_buy_rate_in_inr
 

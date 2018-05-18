@@ -13,7 +13,7 @@ import datetime
 import os
 import glob
 
-myaddress = '1PstYL7f1iUCTtbWfUkYbqg8FkifHTyauK'
+myaddress = input('Enter Bitcoin Address: ')
 
 rpc_connection = AuthServiceProxy("http://%s:%s@127.0.0.1:8332"%('alice', 'passw0rd'))
 

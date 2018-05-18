@@ -126,6 +126,7 @@ def get_bytes_from_readable_script(script: str):
 if __name__ == '__main__':
         print(g_value_opcode_dict)
 
-        script_b = binascii.unhexlify('76a91460d47ac02b129c08f94232ea506d1826424fe7be88ac')
+#        script_b = binascii.unhexlify('76a91460d47ac02b129c08f94232ea506d1826424fe7be88ac')
+        script_b = binascii.unhexlify('a914e9c3dd0c07aac76179ebc76a6c78d4d67c6c160a87')
         script_str = get_readable_script(script_b)
         print('script :: %s' % script_str)
