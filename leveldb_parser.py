@@ -6,6 +6,7 @@ import json
 # Open the LevelDB
 block_db = plyvel.DB(os.path.join(os.getenv('HOME'),".bitcoin/blocks/index"), compression=None)
 chainstate_db = plyvel.DB(os.path.join(os.getenv('HOME'),".bitcoin/chainstate"), compression=None)
+txindex_db = plyvel.DB(os.path.join(os.getenv('HOME'),".bitcoin/indexes/txindex"), compression=None)
 
 BLOCK_HAVE_DATA          =    8
 BLOCK_HAVE_UNDO          =   16
@@ -314,7 +315,7 @@ def getBlockIndex(block_hash_bigendian: bytes):
 def getTxnOffset(txn_hash_bigendian: bytes):
         key = b't' + txn_hash_bigendian
 #        print(key)
-        value = block_db.get(key)
+        value = txindex_db.get(key)
         block_file_number, pos = b128_varint_decode(value, 0)
         block_offset, pos = b128_varint_decode(value, pos)
         txn_offset, pos = b128_varint_decode(value, pos)

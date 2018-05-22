@@ -8,7 +8,6 @@ import io
 import mmap
 import os
 from blockfile_parser import getTransactionCount, getCoinbaseTransaction, getBlockHeader
-from leveldb_parser import getBlockIndex
 import json
 
 #rpc_connection = AuthServiceProxy("http://%s:%s@127.0.0.1:8332"%('alice', 'passw0rd'))
@@ -202,19 +201,13 @@ def getTxnSigned(txn: bytes, sighash_type: int, input_index: int):
         print('txn_signed = %s' % bytes.decode(binascii.hexlify(txn_signed_b)))
         return txn_signed_b
 
-def scriptParser(txn: dict, input_index: int):
-
-        script = txn['input'][input_index]['unlock_script'] + txn['input'][input_index]['lock_script'] 
-        script_len = getCount(txn['input'][input_index]['lock_script_size']) + getCount(txn['input'][input_index]['unlock_script_size'])
-        print('script = %s' % bytes.decode(binascii.hexlify(script)))
-        print('script_len = %d' % script_len)
-        txnfp = io.BytesIO(script)
+def executeScript(script: bytes, stack: list, txn: bytes)
+        script_ptr = io.BytesIO(script)
         if_stack = []
-        stack = []
         alt_stack = []
 
-        while txnfp.tell() < script_len:
-                code = int(binascii.hexlify(txnfp.read(1)), 16)
+        while script_ptr.tell() < script_len:
+                code = int(binascii.hexlify(script_ptr.read(1)), 16)
                 print ('code = %x' % code)
                 print('stack = %s' % stack)
                 if len(if_stack) > 0:
@@ -237,7 +230,7 @@ def scriptParser(txn: dict, input_index: int):
                         stack.append(0)
                 elif code <= 0x4e: # push data
                         print ('pushdata')
-                        op_pushdata(txnfp, code, stack)
+                        op_pushdata(script_ptr, code, stack)
                 elif code == OP_1NEGATE:
                         print ('OP_1NEGATE')
                         stack.append(-1)
@@ -259,11 +252,11 @@ def scriptParser(txn: dict, input_index: int):
                 elif code == OP_VERIFY:
                         print ('OP_VERIFY')
                         if stack[-1] == 0:
-                                return False
+                                return stack, alt_stack, True
                 elif code == OP_RETURN:
                         print ('OP_RETURN')
-                        op_pushdata(txnfp, txnfp.read(1), stack)
-                        return False
+                        op_pushdata(script_ptr, script_ptr.read(1), stack)
+                        return stack, alt_stack, True
                 elif code == OP_TOALTSTACK:
                         print ('OP_TOALTSTACK')
                         alt_stack.append(stack.pop())
@@ -295,12 +288,12 @@ def scriptParser(txn: dict, input_index: int):
                         stack.append(val)
                 elif code == OP_PICK:
                         print ('OP_PICK')
-                        n = int.from_bytes(txnfp.read(1))
+                        n = int.from_bytes(script_ptr.read(1))
                         val = stack[-1 * n]
                         stack.append(val)
                 elif code == OP_ROLL:
                         print ('OP_ROLL')
-                        n = int.from_bytes(txnfp.read(1))
+                        n = int.from_bytes(script_ptr.read(1))
                         val = stack.pop(-1 * n)
                         stack.append(val)
                 elif code == OP_ROT:
@@ -371,7 +364,7 @@ def scriptParser(txn: dict, input_index: int):
                         val1 = stack.pop(-2) # x1
                         val2 = stack.pop(-1) # x2
                         if val1 != val2:
-                                return False
+                                return stack, alt_stack, True
                 elif code == OP_1ADD:
                         print ('OP_1ADD')
                         val = stack.pop()
@@ -430,7 +423,7 @@ def scriptParser(txn: dict, input_index: int):
                         val2 = stack.pop()
                         val1 = stack.pop()
                         if val1 != val2:
-                                return False
+                                return stack, alt_stack, True
                 elif code == OP_NUMNOTEQUAL:
                         print ('OP_NUMNOTEQUAL')
                         val2 = stack.pop()
@@ -502,7 +495,7 @@ def scriptParser(txn: dict, input_index: int):
                         stack.append(pubkey_hash256)
                 elif code == OP_CODESEPARATOR:
                         print ('OP_CODESEPARATOR')
-                        return False # we won't process this as this was widthrawn early in bitcoin
+                        return stack, alt_stack, True # we won't process this as this was widthrawn early in bitcoin
                 elif code == OP_CHECKSIG: # sig pubkey
                         print ('OP_CHECKSIG')
                         pubkey_b = stack.pop()
@@ -521,7 +514,7 @@ def scriptParser(txn: dict, input_index: int):
                         sig_b = r + s
                         is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
                         if is_valid == 0:
-                                return False
+                                return stack, alt_stack, True
                 elif code == OP_CHECKMULTISIG: # <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIG>
                         print ('OP_CHECKMULTISIG')
                         pubkey_count = stack.pop()
@@ -578,28 +571,63 @@ def scriptParser(txn: dict, input_index: int):
                                                 break
                                         continue
                         if is_valid == 0:
-                                return False
+                                return stack, alt_stack, True
                 elif code == OP_CHECKLOCKTIMEVERIFY: # TODO
                         print ('OP_CHECKLOCKTIMEVERIFY')
                         if len(stack) == 0:
-                                return False
+                                return stack, alt_stack, True
                         val = int(binascii.hexlify(stack.pop()[::-1]), 16)
                         if val > n_lock_time or val < 0 or n_sequence == 0xffffffff:
-                                return False
+                                return stack, alt_stack, True
                 elif code == OP_CHECKSEQUENCEVERIFY: # TODO
                         print ('OP_CHECKSEQUENCEVERIFY')
                         val = int(binascii.hexlify(stack.pop()[::-1]), 16)
                         if val < n_lock_time:
-                                return False
+                                return stack, alt_stack, True
                 else: # Any non assigned opcode
-                        return False
+                        return stack, alt_stack, True
 
         print('stack = %s' % stack)
-        for item in stack:
-                if type(item) == bytes:
-                        print('stack item = %s' % bytes.decode(binascii.hexlify(item)))
 
-        return stack.pop()
+        stack.pop()
+
+        return stack, alt_stack, True
+
+def isP2SH(script: bytes):
+        if len(script) == 23 and script[0] == OP_HASH160 and script[1] == 0x14 and script[22] == OP_EQUAL:
+                print('script is P2SH')
+                return True
+
+def verifyScript(txn: dict, input_index: int):
+        unlock_script = txn['input'][input_index]['unlock_script']
+        lock_script = txn['input'][input_index]['lock_script']
+
+        stack = []
+
+        # execute unlock script
+        stack, error = executeScript(unlock_script, stack, txn)
+
+        if error == True:
+                return False
+
+        stack_copy = copy.deepcopy(stack)
+
+        is_p2sh = isP2SH(lock_script)
+
+        # execute lock script
+        stack, error = executeScript(lock_script, stack, txn)
+
+        if len(stack) == 0:
+                return True
+
+        if is_p2sh == True:
+                stack = stack_copy
+                redeem_script = stack.pop()
+                stack, error = executeScript(redeem_script, stack, txn)
+
+                if len(stack) == 0:
+                        return True
+
 
 def convertPKHToAddress(prefix, addr):
     data = prefix + addr
@@ -727,6 +755,8 @@ def unlockTxn(mptr: mmap):
         out_satoshis = sum(int(binascii.hexlify(txn_out['satoshis'][::-1]), 16) for txn_out in txn['out'])
         print('Network fees = %d' % (input_satoshis - out_satoshis))
         for index in range(input_count):
+                is_p2sh = isP2SH(txn['input'][input_index]['lock_script'])
+
                 status = scriptParser(txn, index)
                 print ('status = %s' % status)
                 if status == False:
@@ -737,7 +767,7 @@ def unlockTxn(mptr: mmap):
 g_block_header_size = 80
 
 def validate_all_transactions_of_block(block_hash_bigendian_b: bytes):
-        jsonobj = getBlockIndex(block_hash_bigendian_b)
+        jsonobj = ldb.getBlockIndex(block_hash_bigendian_b)
 #                print('n_file = %d' % jsonobj['n_file'])
         print('block index = %s' % json.dumps(jsonobj))
         if 'data_pos' in jsonobj:
