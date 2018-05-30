@@ -123,6 +123,12 @@ def get_readable_script(script_b: bytes):
 def get_bytes_from_readable_script(script: str):
         pass
 
+def decodeOpN(op_code: int):
+        if op_code == OP_0:
+                return 0
+
+        return (op_code - (OP_1 - 1))
+
 if __name__ == '__main__':
         print(g_value_opcode_dict)
 
@@ -130,3 +136,22 @@ if __name__ == '__main__':
         script_b = binascii.unhexlify('a914e9c3dd0c07aac76179ebc76a6c78d4d67c6c160a87')
         script_str = get_readable_script(script_b)
         print('script :: %s' % script_str)
+
+        print('OP_0 = %d' % decodeOpN(OP_0))
+        print('OP_1NEGATE = %d' % decodeOpN(OP_1NEGATE))
+        print('OP_1 = %d' % decodeOpN(OP_1))
+        print('OP_2 = %d' % decodeOpN(OP_2))
+        print('OP_3 = %d' % decodeOpN(OP_3))
+        print('OP_4 = %d' % decodeOpN(OP_4))
+        print('OP_5 = %d' % decodeOpN(OP_5))
+        print('OP_6 = %d' % decodeOpN(OP_6))
+        print('OP_7 = %d' % decodeOpN(OP_7))
+        print('OP_8 = %d' % decodeOpN(OP_8))
+        print('OP_9 = %d' % decodeOpN(OP_9))
+        print('OP_10 = %d' % decodeOpN(OP_10))
+        print('OP_11 = %d' % decodeOpN(OP_11))
+        print('OP_12 = %d' % decodeOpN(OP_12))
+        print('OP_13 = %d' % decodeOpN(OP_13))
+        print('OP_14 = %d' % decodeOpN(OP_14))
+        print('OP_15 = %d' % decodeOpN(OP_15))
+        print('OP_16 = %d' % decodeOpN(OP_16))

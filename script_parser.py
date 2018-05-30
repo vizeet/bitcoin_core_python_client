@@ -3,23 +3,28 @@ import hashlib
 import ecdsa
 import leveldb_parser as ldb
 from opcode_declarations import * # OPCODE to value assignment such as OP_TRUE = 1
+import script_utils
 #from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 import io
 import mmap
 import os
 from blockfile_parser import getTransactionCount, getCoinbaseTransaction, getBlockHeader
 import json
+import copy
 
 #rpc_connection = AuthServiceProxy("http://%s:%s@127.0.0.1:8332"%('alice', 'passw0rd'))
 
 #raw_txn_str = '01000000012f03082d300efd92837d3f6d910a21d9d19e868242cfebb21198beed7b440999000000004a493046022100c0f693e024f966dc5f834324baa38426bba05460a2b3f9920989d38322176460022100c523a3aa62da26db1fc1902a93741dce3489629df18be11ba68ff9586041821601ffffffff0100f2052a010000001976a9148773ec867e322378e216eefe55bfcede5263059b88ac00000000'
 #raw_txn_str = '01000000017f950ab790838e0c05e79856d25d586823fe139e1807405a3f207ff33f9b7663010000006b483045022100d8629403cd3b49950da9293653c6279149c029e6b7b15371342d0d2ce286c8f2022078787985a644e94fd9246f6c25733336c94af5f00d9d34a07dc2f9e0987ef990012102b726d7eae11a6d5cf3b2362e773e116a6140347dcee1b2943f4a2897351e5d90ffffffff021bf03c000000000017a91469f3757380a56820abc7052867216599e575cddd8777c1ca1c000000001976a914d5f950abe0b559b2b7a7ab3d18a507ea1c3e4ac688ac00000000'
 #txn_hash = '4269fdc239d027922dcec96f1ae283dbaff10e2d1bd49605661d091e79714956'
+#txn_hash = 'a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d'
 #txn_hash = '8ca45aed169b0434ad5a117804cdf6eec715208d57f13396c0ba18fb5a327e30' # P2PKH
 #txn_hash = '40eee3ae1760e3a8532263678cdf64569e6ad06abc133af64f735e52562bccc8'
 txn_hash = '7edb32d4ffd7a385b763c7a8e56b6358bcd729e747290624e18acdbe6209fc45' # P2SH
-block_hash = '0000000000000000009a8aa7b36b0e37a28bf98956097b7b844e172692e604e1'
+#block_hash = '0000000000000000009a8aa7b36b0e37a28bf98956097b7b844e172692e604e1' # Pre-Segwit
+block_hash = '0000000000000000000e377cd4083945678ad30c533a8729198bf3b12a8e9315' # Segwit block
 
+g_multisig_counter = 0
 
 g_script_command_info = {}
 
@@ -103,6 +108,8 @@ def op_pushdata(mptr: io.BytesIO, code: int, stack: list):
         mptr_read = mptr.read(size)
         print('size = %d, data = %s' % (size, bytes.decode(binascii.hexlify(mptr_read))))
         stack.append(mptr_read)
+        print('stack size = %d' % len(stack))
+        return stack
 
 def hash256(bstr):
     return hashlib.sha256(hashlib.sha256(bstr).digest()).digest()
@@ -161,21 +168,26 @@ def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn_b: bytes):
 
         prefix = pubkey_b[0:1]
         print('prefix = %s' % prefix)
+        print('input pubkey = %s' % bytes.decode(binascii.hexlify(pubkey_b)))
         if prefix == b'\x02' or prefix == b'\x03':
                 pubkey_b = getFullPubKeyFromCompressed(pubkey_b)[1:]
         elif prefix == b'\x04':
                 pubkey_b = pubkey_b[1:]
 
-        print("full public key = %s" % bytes.decode(binascii.hexlify(pubkey_b)))
-        vk = ecdsa.VerifyingKey.from_string(pubkey_b, curve=ecdsa.SECP256k1)
-        if vk.verify(sig_b, txn_sha256_b, hashlib.sha256) == True:
-                print('valid')
-                return 1
-        else:
-                print('invalid')
+        try:
+                print("full public key = %s" % bytes.decode(binascii.hexlify(pubkey_b)))
+                vk = ecdsa.VerifyingKey.from_string(pubkey_b, curve=ecdsa.SECP256k1)
+                if vk.verify(sig_b, txn_sha256_b, hashlib.sha256) == True:
+                        print('valid')
+                        return 1
+                else:
+                        print('sigcheck: invalid')
+                        return 0
+        except ecdsa.BadSignatureError:
+                print('sigcheck: Bad Signature')
                 return 0
 
-def getTxnSigned(txn: bytes, sighash_type: int, input_index: int):
+def getTxnSigned(txn: bytes, sighash_type: int, input_index: int, script: bytes):
         txn_signed_b = None
         if sighash_type == g_script_sig_dict['SIGHASH_ALL']:
                 txn_signed_b = txn['version']
@@ -186,8 +198,10 @@ def getTxnSigned(txn: bytes, sighash_type: int, input_index: int):
                         txn_signed_b += txn['input'][index]['prev_txn_hash']
                         txn_signed_b += txn['input'][index]['prev_txn_out_index']
                         if input_index == index:
-                                txn_signed_b += txn['input'][index]['lock_script_size']
-                                txn_signed_b += txn['input'][index]['lock_script']
+#                                txn_signed_b += txn['input'][index]['lock_script_size']
+#                                txn_signed_b += txn['input'][index]['lock_script']
+                                txn_signed_b += bytes([len(script)])
+                                txn_signed_b += script
                         else:
                                 txn_signed_b += b'\x00'
                         txn_signed_b += txn['input'][index]['sequence']
@@ -201,15 +215,18 @@ def getTxnSigned(txn: bytes, sighash_type: int, input_index: int):
         print('txn_signed = %s' % bytes.decode(binascii.hexlify(txn_signed_b)))
         return txn_signed_b
 
-def executeScript(script: bytes, stack: list, txn: bytes)
+def executeScript(script: bytes, stack: list, txn: bytes, input_index: int):
+        global g_multisig_counter
+        script_len = len(script)
         script_ptr = io.BytesIO(script)
         if_stack = []
         alt_stack = []
 
         while script_ptr.tell() < script_len:
+                print('stack = %s' % stack)
+                print('')
                 code = int(binascii.hexlify(script_ptr.read(1)), 16)
                 print ('code = %x' % code)
-                print('stack = %s' % stack)
                 if len(if_stack) > 0:
                         if if_stack[-1] == OP_FALSE:
                                 if code == OP_ELSE:
@@ -227,19 +244,17 @@ def executeScript(script: bytes, stack: list, txn: bytes)
                                         if_stack.pop()
                 if code == OP_0: # OP_0, OP_FALSE
                         print ('OP_0')
-                        stack.append(0)
+                        script_utils.decodeOpN(code)
+                        stack.append(script_utils.decodeOpN(code))
                 elif code <= 0x4e: # push data
                         print ('pushdata')
                         op_pushdata(script_ptr, code, stack)
                 elif code == OP_1NEGATE:
                         print ('OP_1NEGATE')
-                        stack.append(-1)
-                elif code == OP_1: # OP_1, OP_TRUE
-                        print ('OP_1')
-                        stack.append(1)
-                elif code <= OP_16: # OP_2-OP_16
-                        print ('OP_2 to OP_16')
-                        stack.append(code - 0x50)
+                        stack.append(script_utils.decodeOpN(code))
+                elif code <= OP_16: # OP_1-OP_16
+                        print ('OP_1 to OP_16')
+                        stack.append(script_utils.decodeOpN(code))
                 elif code == OP_NOP:
                         print ('OP_NOP')
                         pass
@@ -252,11 +267,12 @@ def executeScript(script: bytes, stack: list, txn: bytes)
                 elif code == OP_VERIFY:
                         print ('OP_VERIFY')
                         if stack[-1] == 0:
-                                return stack, alt_stack, True
+                                return stack
                 elif code == OP_RETURN:
                         print ('OP_RETURN')
                         op_pushdata(script_ptr, script_ptr.read(1), stack)
-                        return stack, alt_stack, True
+                        stack.append(0)
+                        return stack
                 elif code == OP_TOALTSTACK:
                         print ('OP_TOALTSTACK')
                         alt_stack.append(stack.pop())
@@ -364,7 +380,8 @@ def executeScript(script: bytes, stack: list, txn: bytes)
                         val1 = stack.pop(-2) # x1
                         val2 = stack.pop(-1) # x2
                         if val1 != val2:
-                                return stack, alt_stack, True
+                                stack.append(0)
+                                return stack
                 elif code == OP_1ADD:
                         print ('OP_1ADD')
                         val = stack.pop()
@@ -423,7 +440,8 @@ def executeScript(script: bytes, stack: list, txn: bytes)
                         val2 = stack.pop()
                         val1 = stack.pop()
                         if val1 != val2:
-                                return stack, alt_stack, True
+                                stack.append(0)
+                                return stack
                 elif code == OP_NUMNOTEQUAL:
                         print ('OP_NUMNOTEQUAL')
                         val2 = stack.pop()
@@ -483,10 +501,12 @@ def executeScript(script: bytes, stack: list, txn: bytes)
                 elif code == OP_HASH160:
                         print ('OP_HASH160')
                         pubkey = stack.pop()
+                        print('OP_HASH160: pubkey = %s' % bytes.decode(binascii.hexlify(pubkey)))
                         pubkeyhash = hashlib.sha256(pubkey).digest()
                         h = hashlib.new('ripemd160')
                         h.update(pubkeyhash)
                         pubkey_hash160 = h.digest()
+                        print('Hash 160 = %s' % bytes.decode(binascii.hexlify(pubkey_hash160)))
                         stack.append(pubkey_hash160)
                 elif code == OP_HASH256:
                         print ('OP_HASH256')
@@ -495,119 +515,208 @@ def executeScript(script: bytes, stack: list, txn: bytes)
                         stack.append(pubkey_hash256)
                 elif code == OP_CODESEPARATOR:
                         print ('OP_CODESEPARATOR')
-                        return stack, alt_stack, True # we won't process this as this was widthrawn early in bitcoin
+                        stack.append(0)
+                        return stack # we won't process this as this was widthrawn early in bitcoin
                 elif code == OP_CHECKSIG: # sig pubkey
                         print ('OP_CHECKSIG')
                         pubkey_b = stack.pop()
                         complete_sig_b = stack.pop()
                         r, s, sighash_type = splitSig(complete_sig_b)
-                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index)
+                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script)
                         sig_b = r + s
                         is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
                         stack.append(is_valid)
                 elif code == OP_CHECKSIGVERIFY:
                         print ('OP_CHECKSIGVERIFY')
                         pubkey_b = stack.pop()
-                        sig_b = stack.pop() # this is R, S and sig_type
+                        complete_sig_b = stack.pop() # this is R, S and sig_type
                         r, s, sighash_type = splitSig(complete_sig_b)
-                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index)
+                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script)
                         sig_b = r + s
                         is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
                         if is_valid == 0:
-                                return stack, alt_stack, True
+                                stack.append(0)
+                                return stack
                 elif code == OP_CHECKMULTISIG: # <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIG>
                         print ('OP_CHECKMULTISIG')
-                        pubkey_count = stack.pop()
-                        pubkey_array = [stack.pop() for index in range(pubkey_count)][::-1]
-                        min_valid_sig_count = stack.pop()
-                        sig_array = []
-                        remaining_valid_sig = min_valid_sig_count
-                        while True:
-                                sig_b = stack.pop()
-                                if sig_b == 0:
-                                        sig_array = sig_array[::-1]
-                                        break;
-                                sig_array.append(sig_b)
-                        sig_index = 0
-                        is_valid = 0
-                        for pubkey_b in pubkey_array:
-                                sig_b = sig_array[sig_index]
+                        g_multisig_counter += 1
+                        print ('Multisig counter = %d' % g_multisig_counter)
+                        pubkey_count = stack[-1]
+                        min_valid_sig = stack[-1-pubkey_count-1]
+                        sig_count = len(stack) - pubkey_count - 3 # 0,sig1,sig2,sig3,2,key1,key2,key3,3 ; 
+                                                                  # len = 9, pubkey_count = 3; len - pubkey_count = 6; sig_count = len - pubkey_count - 3 = 3
+                        sig_index = 1
+                        pubkey_index = 1 + min_valid_sig + 1
+                        print('pubkey_count = %d, min_valid_sig = %d' % (pubkey_count, min_valid_sig))
+
+                        remaining_valid_sig = min_valid_sig
+                        remaining_pubkey = pubkey_count
+                        remaining_sig = sig_count
+                        while remaining_valid_sig > 0:
+                                if remaining_sig > remaining_pubkey:
+                                        stack.append(0)
+                                        return stack
+                                complete_sig_b = stack[sig_index]
+                                pubkey_b = stack[pubkey_index]
+                                if type(complete_sig_b) != bytes or type(pubkey_b) != bytes:
+                                        print('type of sig = %s, type of pubkey = %s' % (type(complete_sig_b), type(pubkey_b)))
+                                        return False
                                 r, s, sighash_type = splitSig(complete_sig_b)
-                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index)
+                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script)
                                 sig_b = r + s
-                                is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
+                                is_valid_sig = sigcheck(sig_b, pubkey_b, txn_signed_b)
                                 if is_valid_sig == 1:
                                         remaining_valid_sig -= 1
                                         if remaining_valid_sig == 0:
                                                 is_valid = 1
                                                 break
+                                        sig_index += 1
+                                        remaining_sig -= 1
                                         continue
+                                pubkey_index += 1
+                                remaining_pubkey -= 1
+                        print("Multisig Valid: %s" % is_valid)
+                        stack.clear()
                         stack.append(is_valid)
                 elif code == OP_CHECKMULTISIGVERIFY: # <OP_0> <sig A> <sig B> <OP_2> <A pubkey> <B pubkey> <C pubkey> <OP_3> <OP_CHECKMULTISIGVERIFY>
                         print ('OP_CHECKMULTISIGVERIFY')
-                        pubkey_count = stack.pop()
-                        pubkey_array = [stack.pop() for index in range(pubkey_count)][::-1]
-                        min_valid_sig_count = stack.pop()
-                        sig_array = []
-                        remaining_valid_sig = min_valid_sig_count
-                        while True:
-                                sig_b = stack.pop()
-                                if sig_b == 0:
-                                        sig_array = sig_array[::-1]
-                                        break;
-                                sig_array.append(sig_b)
-                        sig_index = 0
-                        is_valid = 0
-                        for pubkey_b in pubkey_array:
-                                sig_b = sig_array[sig_index]
+                        pubkey_count = stack[-1]
+                        min_valid_sig = stack[-1-pubkey_count-1]
+                        sig_count = len(stack) - pubkey_count - 3 # 0,sig1,sig2,sig3,2,key1,key2,key3,3 ; 
+                                                                  # len = 9, pubkey_count = 3; len - pubkey_count = 6; sig_count = len - pubkey_count - 3 = 3
+                        sig_index = 1
+                        pubkey_index = 1 + min_valid_sig + 1
+                        print('pubkey_count = %d, min_valid_sig = %d' % (pubkey_count, min_valid_sig))
+
+                        remaining_valid_sig = min_valid_sig
+                        remaining_pubkey = pubkey_count
+                        remaining_sig = sig_count
+                        while remaining_valid_sig > 0:
+                                if remaining_sig > remaining_pubkey:
+                                        stack.append(0)
+                                        return stack
+                                complete_sig_b = stack[sig_index]
+                                pubkey_b = stack[pubkey_index]
+                                if type(complete_sig_b) != bytes or type(pubkey_b) != bytes:
+                                        print('type of sig = %s, type of pubkey = %s' % (type(complete_sig_b), type(pubkey_b)))
+                                        return False
                                 r, s, sighash_type = splitSig(complete_sig_b)
-                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index)
+                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script)
                                 sig_b = r + s
-                                is_valid_sig = sigcheck(sig_b, pubkey_b, signed_txn)
+                                is_valid_sig = sigcheck(sig_b, pubkey_b, txn_signed_b)
                                 if is_valid_sig == 1:
                                         remaining_valid_sig -= 1
                                         if remaining_valid_sig == 0:
                                                 is_valid = 1
                                                 break
+                                        sig_index += 1
+                                        remaining_sig -= 1
                                         continue
+                                pubkey_index += 1
+                                remaining_pubkey -= 1
+                        print("Multisig Valid: %s" % is_valid)
                         if is_valid == 0:
-                                return stack, alt_stack, True
+                                stack.append(0)
+                                return stack
+                        stack.clear()
                 elif code == OP_CHECKLOCKTIMEVERIFY: # TODO
                         print ('OP_CHECKLOCKTIMEVERIFY')
                         if len(stack) == 0:
-                                return stack, alt_stack, True
+                                stack.append(0)
+                                return stack
                         val = int(binascii.hexlify(stack.pop()[::-1]), 16)
                         if val > n_lock_time or val < 0 or n_sequence == 0xffffffff:
-                                return stack, alt_stack, True
+                                stack.append(0)
+                                return stack
                 elif code == OP_CHECKSEQUENCEVERIFY: # TODO
                         print ('OP_CHECKSEQUENCEVERIFY')
                         val = int(binascii.hexlify(stack.pop()[::-1]), 16)
                         if val < n_lock_time:
-                                return stack, alt_stack, True
+                                stack.append(0)
+                                return stack
                 else: # Any non assigned opcode
-                        return stack, alt_stack, True
+                        stack.append(0)
+                        return stack
 
-        print('stack = %s' % stack)
+#        print('stack = %s' % stack)
 
-        stack.pop()
+#        stack.pop()
 
-        return stack, alt_stack, True
+        return stack
 
 def isP2SH(script: bytes):
         if len(script) == 23 and script[0] == OP_HASH160 and script[1] == 0x14 and script[22] == OP_EQUAL:
                 print('script is P2SH')
                 return True
+        return False
+
+def isWitnessProgram(script: bytes):
+        script_size = len(script)
+        if script_size < 4 or script_size > 42:
+                return False
+
+        if script[0] != OP_0 and (script[0] < OP_1 or script[0] > OP_16):
+                return False
+
+        if (script[1] + 2) != script_size:
+                return False
+
+        return True
+
+#        version = decodeOpN(script[0])
+#        program = script[2:]
+#        return version, program
+
+WITNESS_V0_P2SH_SIZE = 32
+WITNESS_V0_P2PKH_SIZE = 20
+
+def verifyWitnessProgram(witness_stack: list, witness_version: int, witness_program: bytes, txn: bytes, input_index: int):
+        global WITNESS_V0_P2SH_SIZE, WITNESS_V0_P2PKH_SIZE
+        if witness_version != 0:
+                return False
+        if len(witness_program) == WITNESS_V0_P2SH_SIZE:
+                scriptPubKey = witness_stack.pop()
+                hashScriptPubKey = hashlib.sha256(scriptPubKey).digest()
+                print('scriptPubKey = %s' % bytes.decode(binascii.hexlify(scriptPubKey)))
+                print('witness_program = %s' % bytes.decode(binascii.hexlify(witness_program)))
+                print('sha256 of scriptPubKey = %s' % bytes.decode(binascii.hexlify(hashScriptPubKey)))
+                if hashScriptPubKey == witness_program:
+                        print('WPSH: Matched')
+                else:
+                        return False
+        if len(witness_program) == WITNESS_V0_P2PKH_SIZE:
+                if len(witness_stack) != 2:
+                        return False
+                print('WPKH: witness_program = %s' % bytes.decode(binascii.hexlify(witness_program)))
+                scriptPubKey = bytes([OP_DUP, OP_HASH160, witness_program, OP_EQUALVERIFY, OP_CHECKSIG])
+                print('WPKH: scriptPubKey = %s' % bytes.decode(binascii.hexlify(witness_program)))
+
+        stack = copy.deepcopy(witness_stack)
+        stack = executeScript(scriptPubKey, stack, txn, input_index)
+
+        if len(stack) == 1 and stack[-1] == True:
+                stack.pop()
+        else:
+                print('execute redeem script failed')
+                return False
 
 def verifyScript(txn: dict, input_index: int):
         unlock_script = txn['input'][input_index]['unlock_script']
         lock_script = txn['input'][input_index]['lock_script']
 
+        print('lock_script = %s' % bytes.decode(binascii.hexlify(lock_script)))
+        print('unlock_script = %s' % bytes.decode(binascii.hexlify(unlock_script)))
+
         stack = []
 
         # execute unlock script
-        stack, error = executeScript(unlock_script, stack, txn)
+        stack = executeScript(unlock_script, stack, txn, input_index)
 
-        if error == True:
+        if len(stack) > 0 and stack[-1] == True:
+                stack.pop()
+
+        if len(stack) > 0 and stack[-1] == False:
+                print('execute lock script failed')
                 return False
 
         stack_copy = copy.deepcopy(stack)
@@ -615,18 +724,54 @@ def verifyScript(txn: dict, input_index: int):
         is_p2sh = isP2SH(lock_script)
 
         # execute lock script
-        stack, error = executeScript(lock_script, stack, txn)
+        stack = executeScript(lock_script, stack, txn, input_index)
 
-        if len(stack) == 0:
-                return True
+        witness_flag = 'is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1
 
-        if is_p2sh == True:
-                stack = stack_copy
-                redeem_script = stack.pop()
-                stack, error = executeScript(redeem_script, stack, txn)
+        if witness_flag == True and isWitnessProgram(lock_script):
+                print("Witness Program")
+                witness_version = script_utils.decodeOpN(lock_script[0])
+                witness_program = lock_script[2:]
+                witness_stack = copy.deepcopy(txn['input'][input_index]['witness'])
+                print('witness_stack = %s' % witness_stack)
+                print('witness stack size = %s' % txn['input'][input_index]['witness_count'])
+                verifyWitnessProgram(witness_stack, witness_version, witness_program, txn, input_index)
 
-                if len(stack) == 0:
+        if is_p2sh == False:
+                print('Script is not P2SH')
+                if len(stack) == 1 and stack[-1] == True:
+                        stack.pop()
+                else:
+                        print('execute lock script failed')
+                        return False
+        else:
+                print('Script is P2SH')
+                if len(stack) == 1 and stack[-1] == True:
                         return True
+
+                if len(stack) > 0 and stack[-1] == True:
+                        stack.pop()
+
+                if len(stack) > 0 and stack[-1] == False:
+                        print('execute lock script failed')
+                        return False
+
+                stack = stack_copy
+
+                redeem_script = stack.pop()
+                stack = executeScript(redeem_script, stack, txn, input_index)
+
+                if len(stack) == 1 and stack[-1] == True:
+                        stack.pop()
+                else:
+                        print('execute redeem script failed')
+                        return False
+
+        if 'is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1:
+                print('Segwit Transaction')
+                exit()
+
+        return True
 
 
 def convertPKHToAddress(prefix, addr):
@@ -705,6 +850,7 @@ def unlockTxn(mptr: mmap):
         if input_count == 0:
                 # post segwit
                 txn['is_segwit'] = mptr.read(1)
+                print('is_segwit? %d' % int(binascii.hexlify(txn['is_segwit']), 16))
                 txn['input_count'] = getCountBytes(mptr)
                 input_count = getCount(txn['input_count'])
 
@@ -739,25 +885,22 @@ def unlockTxn(mptr: mmap):
                 scriptpubkey_size = getCount(txn_out['scriptpubkey_size'])
                 txn_out['scriptpubkey'] = mptr.read(scriptpubkey_size)
                 txn['out'].append(txn_out)
-        if 'is_segwit' in txn and txn['is_segwit'] == True:
+        if 'is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1:
+                print('YYYYYYYYYYYYYYYYYYYYYYYYYYY inside segwit')
                 for index in range(input_count):
                         txn['input'][index]['witness_count'] = getCountBytes(mptr)
                         witness_count = getCount(txn['input'][index]['witness_count'])
                         txn['input'][index]['witness'] = []
                         for inner_index in range(getCount(txn['input'][index]['witness_count'])):
                                 txn_witness = {}
-                                txn_witness['size'] = getCountBytes(mptr)
-                                witness_size = getCount(txn_witness['size'])
-                                txn_witness['witness'] = bytes.decode(binascii.hexlify(mptr.read(witness_size)))
-                                txn['input'][index]['witness'].append(txn_witness)
+                                witness_size = getCount(getCountBytes(mptr))
+                                txn['input'][index]['witness'].append(mptr.read(witness_size))
         txn['locktime'] = mptr.read(4)
         input_satoshis = sum(txn_input['satoshis'] for txn_input in txn['input'])
         out_satoshis = sum(int(binascii.hexlify(txn_out['satoshis'][::-1]), 16) for txn_out in txn['out'])
         print('Network fees = %d' % (input_satoshis - out_satoshis))
         for index in range(input_count):
-                is_p2sh = isP2SH(txn['input'][input_index]['lock_script'])
-
-                status = scriptParser(txn, index)
+                status = verifyScript(txn, index)
                 print ('status = %s' % status)
                 if status == False:
                         print('Invalid Transaction')
@@ -811,11 +954,11 @@ if __name__ == '__main__':
                 mptr = mmap.mmap(block_file.fileno(), 0, prot=mmap.PROT_READ) #File is open read-only
 
                 mptr.seek(block_offset + g_block_header_size + txn_offset)
-                isValid = unlockTxn(mptr)
+                isValid, satoshis = unlockTxn(mptr)
                 if isValid == False:
                         print('Invalid Transaction')
                 else:
                         print('Valid Transaction')
 
-#        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
-#        validate_all_transactions_of_block(block_hash_bigendian_b)
+        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
+        validate_all_transactions_of_block(block_hash_bigendian_b)

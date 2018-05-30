@@ -210,7 +210,8 @@ def totalTransactionFeeInBlock(block_height: int):
 def getNetworkHashRate(block_height: int):
         block = getBlock(block_height)
         target_threshold = int(getTargetThreshold(block['bits']), 16)
-        network_hashrate = (2 ** 256) / ((target_threshold + 1) * 600)
+#        network_hashrate = (2 ** 256) / ((target_threshold + 1) * 600)
+        network_hashrate = (2 ** 256) / (target_threshold * 600)
         return network_hashrate
 
 #
