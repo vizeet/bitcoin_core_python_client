@@ -21,7 +21,8 @@ import copy
 #txn_hash = '8ca45aed169b0434ad5a117804cdf6eec715208d57f13396c0ba18fb5a327e30' # P2PKH
 #txn_hash = '40eee3ae1760e3a8532263678cdf64569e6ad06abc133af64f735e52562bccc8'
 #txn_hash = '7edb32d4ffd7a385b763c7a8e56b6358bcd729e747290624e18acdbe6209fc45' # P2SH
-txn_hash = '581cff2eab901adce9e62f08ee7e8306d7a6d678a1974c029d33ec9426d0b14f' #P2WPKH
+#txn_hash = '581cff2eab901adce9e62f08ee7e8306d7a6d678a1974c029d33ec9426d0b14f' #Bare P2WSH
+txn_hash = '7f48d5fd4c993305d5fe027c5ddc23b95a0757657f91de75cf1cd2dc732f284c' #P2SH-P2WSH
 #block_hash = '0000000000000000009a8aa7b36b0e37a28bf98956097b7b844e172692e604e1' # Pre-Segwit
 block_hash = '0000000000000000000e377cd4083945678ad30c533a8729198bf3b12a8e9315' # Segwit block
 
@@ -620,7 +621,8 @@ def executeScript(script: bytes, stack: list, txn: bytes, input_index: int, is_w
                                 pubkey_b = stack[pubkey_index]
                                 if type(complete_sig_b) != bytes or type(pubkey_b) != bytes:
                                         print('type of sig = %s, type of pubkey = %s' % (type(complete_sig_b), type(pubkey_b)))
-                                        return False
+                                        stack.append(0)
+                                        return stack
                                 r, s, sighash_type = splitSig(complete_sig_b)
                                 txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script, is_witness)
                                 sig_b = r + s
@@ -659,7 +661,8 @@ def executeScript(script: bytes, stack: list, txn: bytes, input_index: int, is_w
                                 pubkey_b = stack[pubkey_index]
                                 if type(complete_sig_b) != bytes or type(pubkey_b) != bytes:
                                         print('type of sig = %s, type of pubkey = %s' % (type(complete_sig_b), type(pubkey_b)))
-                                        return False
+                                        stack.append(0)
+                                        return stack
                                 r, s, sighash_type = splitSig(complete_sig_b)
                                 txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script, is_witness)
                                 sig_b = r + s
@@ -777,11 +780,8 @@ def verifyScript(txn: dict, input_index: int, is_witness: bool):
         # execute unlock script
         stack = executeScript(unlock_script, stack, txn, input_index, is_witness=is_witness)
 
-        if len(stack) > 0 and stack[-1] == True:
-                stack.pop()
-
-        if len(stack) > 0 and stack[-1] == False:
-                print('execute lock script failed')
+        if len(stack) > 0 and stack[-1] == 0:
+                print('execute unlock script failed')
                 return False
 
         stack_copy = copy.deepcopy(stack)
@@ -791,8 +791,17 @@ def verifyScript(txn: dict, input_index: int, is_witness: bool):
         # execute lock script
         stack = executeScript(lock_script, stack, txn, input_index, is_witness=is_witness)
 
+        if len(stack) == 0:
+                print('Stack is empty after lock script execute')
+                return False
+
+        if len(stack) > 0 and stack[-1] == 0:
+                print('execute lock script failed')
+                return False
+
 #        witness_flag = 'is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1
 
+        # bare witness program
         if is_witness == True and isWitnessProgram(lock_script):
                 print("Witness Program")
                 witness_version = script_utils.decodeOpN(lock_script[0])
@@ -801,37 +810,45 @@ def verifyScript(txn: dict, input_index: int, is_witness: bool):
                 print('witness_stack = %s' % witness_stack)
                 print('witness stack size = %s' % txn['input'][input_index]['witness_count'])
                 status = verifyWitnessProgram(witness_stack, witness_version, witness_program, txn, input_index)
-                print('Witness script passed')
+                if status == False:
+                       print('Verify Witness failed') 
+                print('Verify Witness passed')
+                print('stack = %s' % stack)
+                stack = stack[0:1]
 
-        if is_p2sh == False:
-                print('Script is not P2SH')
-                if len(stack) == 1 and stack[-1] == True:
-                        stack.pop()
-                else:
-                        print('execute lock script failed')
-                        return False
-        else:
+        if is_p2sh == True:
                 print('Script is P2SH')
-                if len(stack) == 1 and stack[-1] == True:
-                        return True
-
-                if len(stack) > 0 and stack[-1] == True:
-                        stack.pop()
-
-                if len(stack) > 0 and stack[-1] == False:
-                        print('execute lock script failed')
-                        return False
 
                 stack = stack_copy
 
                 redeem_script = stack.pop()
                 stack = executeScript(redeem_script, stack, txn, input_index, is_witness=is_witness)
 
-                if len(stack) == 1 and stack[-1] == True:
-                        stack.pop()
-                else:
+                if len(stack) == 0:
+                        print('Stack is empty after execute redeem script')
+                        return False
+
+                if len(stack) > 0 and stack[-1] == 0:
                         print('execute redeem script failed')
                         return False
+
+                #Witness wrapped in P2SH
+                if is_witness == True and isWitnessProgram(redeem_script):
+                        print("Witness Program")
+                        witness_version = script_utils.decodeOpN(lock_script[0])
+                        witness_program = lock_script[2:]
+                        witness_stack = copy.deepcopy(txn['input'][input_index]['witness'])
+                        print('witness_stack = %s' % witness_stack)
+                        print('witness stack size = %s' % txn['input'][input_index]['witness_count'])
+                        status = verifyWitnessProgram(witness_stack, witness_version, witness_program, txn, input_index)
+                        if status == False:
+                                print('Verify Witness failed') 
+                        print('Witness script passed')
+                        print('stack = %s' % stack)
+                        stack = stack[0:1]
+
+        if len(stack) != 1:
+                return False
 
         return True
 
@@ -1006,41 +1023,21 @@ def validate_all_transactions_of_block(block_hash_bigendian_b: bytes):
                 print('mining reward = %.8f' % (sum(out['satoshis'] for out in coinbase_txn['out']) / 100000000.0))
                 print('net_fees = %.8f' % (net_fees / 100000000.0))
 
-if __name__ == '__main__':
-        txn_hash_bigendian = binascii.unhexlify(txn_hash)[::-1]
-        block_file_number, block_offset, txn_offset = ldb.getTxnOffset(txn_hash_bigendian)
-        print('block_file_number = %d, block_offset = %d, txn_offset = %d' % (block_file_number, block_offset, txn_offset))
-
-        blocks_path = os.path.join(os.getenv('HOME'), '.bitcoin', 'blocks')
-        block_filepath = os.path.join(blocks_path, 'blk%05d.dat' % block_file_number)
-
-        with open(block_filepath, 'rb') as block_file:
-                mptr = mmap.mmap(block_file.fileno(), 0, prot=mmap.PROT_READ) #File is open read-only
-
-                mptr.seek(block_offset + g_block_header_size + txn_offset)
-                isValid, satoshis = unlockTxn(mptr)
-                if isValid == False:
-                        print('Invalid Transaction')
-                else:
-                        print('Valid Transaction')
-
-#        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
-#        validate_all_transactions_of_block(block_hash_bigendian_b)
-# P2SH-P2WSH
+def bareP2WSH():
         prev_txn = '1b1ff08554033f9bbaabf2573935caf5a20838e5b950be7658576b09a82ece0f'
         prev_outindex = '07000000'
         prevouts = prev_txn + prev_outindex
         prevouts_b = binascii.unhexlify(prevouts)
         print('previous txnid = %s' % bytes.decode(binascii.hexlify(binascii.unhexlify(prev_txn)[::-1])))
-        hashPrevouts = hash256(prevouts_b)
+        hash_prevouts = hash256(prevouts_b)
 
         sequence = 'ffffffff'
         sequence_b = binascii.unhexlify(sequence)
-        hashSequence = hash256(sequence_b)
+        hash_sequence = hash256(sequence_b)
 
         outputs = '4021d000000000001976a9142cbe180b31c771d1fc05be6be1ffbfd76259382f88acf09c0900000000001976a914e49cd22f16302886f3f66040a1ab2d998c78b2bb88acc0ec4f1c000000001976a91404c3ee0e4549ccb0ed0fffc8528dc2df7517a87d88ac804f12000000000017a91469f374873cd7b681dc1f21ee6d1b381d6a5ac0988780841e000000000017a914eaac0372cd3083c7b9147def37cccfd91c783c7787a887ca000000000017a9144061ccd8877845764399ad0b88722d24b959b44787004fb406000000001976a9142b81e68a154e013cdd7421ac6738cc85b93bfbe388acb0b63e000000000017a91469f37525851e28b1e0c17d5e6eb891595d88104e8790e31300000000001976a914c985b30155adfed8222a5e2fef8fb01cecdfb61488ac38076e1600000000220020701a8d401c84fb13e6baf169d59684e17abd9fa216c8cc5b9fc63d622ff8c58d'
         outputs_b = binascii.unhexlify(outputs)
-        hashOutputs = hash256(outputs_b)
+        hash_outputs = hash256(outputs_b)
 
         version = '01000000'
         version_b = binascii.unhexlify(version)
@@ -1065,7 +1062,7 @@ if __name__ == '__main__':
         hashtype = '01000000'
         hashtype_b = binascii.unhexlify(hashtype)
 
-        txn_signed_b = version_b + hashPrevouts + hashSequence + outpoint_b + scriptCode_b + amount_b + sequence_b + hashOutputs + locktime_b + hashtype_b
+        txn_signed_b = version_b + hash_prevouts + hash_sequence + outpoint_b + scriptCode_b + amount_b + sequence_b + hash_outputs + locktime_b + hashtype_b
         print('txn_signed = %s' % bytes.decode(binascii.hexlify(txn_signed_b)))
 
         complete_sig = '3045022100faa18bdbb4c5e82cfe0424d30d0d1546bd8c5633f180f6f01bd610f0f66ea98e02205f43ca24bcbe458c784230af96ed0287a2f16e102fd1fb1043f3359e224c40ca01'
@@ -1081,3 +1078,25 @@ if __name__ == '__main__':
         
         is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
         print('is_valid = %d' % is_valid)
+
+if __name__ == '__main__':
+        txn_hash_bigendian = binascii.unhexlify(txn_hash)[::-1]
+        block_file_number, block_offset, txn_offset = ldb.getTxnOffset(txn_hash_bigendian)
+        print('block_file_number = %d, block_offset = %d, txn_offset = %d' % (block_file_number, block_offset, txn_offset))
+
+        blocks_path = os.path.join(os.getenv('HOME'), '.bitcoin', 'blocks')
+        block_filepath = os.path.join(blocks_path, 'blk%05d.dat' % block_file_number)
+
+        with open(block_filepath, 'rb') as block_file:
+                mptr = mmap.mmap(block_file.fileno(), 0, prot=mmap.PROT_READ) #File is open read-only
+
+                mptr.seek(block_offset + g_block_header_size + txn_offset)
+                isValid, satoshis = unlockTxn(mptr)
+                if isValid == False:
+                        print('Invalid Transaction')
+                else:
+                        print('Valid Transaction')
+
+
+#        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
+#        validate_all_transactions_of_block(block_hash_bigendian_b)
