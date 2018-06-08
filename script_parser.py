@@ -20,7 +20,8 @@ import copy
 #txn_hash = 'a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d'
 #txn_hash = '8ca45aed169b0434ad5a117804cdf6eec715208d57f13396c0ba18fb5a327e30' # P2PKH
 #txn_hash = '40eee3ae1760e3a8532263678cdf64569e6ad06abc133af64f735e52562bccc8'
-txn_hash = '7edb32d4ffd7a385b763c7a8e56b6358bcd729e747290624e18acdbe6209fc45' # P2SH
+#txn_hash = '7edb32d4ffd7a385b763c7a8e56b6358bcd729e747290624e18acdbe6209fc45' # P2SH
+txn_hash = '581cff2eab901adce9e62f08ee7e8306d7a6d678a1974c029d33ec9426d0b14f' #P2WPKH
 #block_hash = '0000000000000000009a8aa7b36b0e37a28bf98956097b7b844e172692e604e1' # Pre-Segwit
 block_hash = '0000000000000000000e377cd4083945678ad30c533a8729198bf3b12a8e9315' # Segwit block
 
@@ -42,6 +43,16 @@ def getCount(count_bytes):
         else:
                 txn_size = int(binascii.hexlify(count_bytes[1:9][::-1]), 16)
                 return txn_size
+
+def encodeVarInt(size: int):
+        if size <= 0xfc:
+                return binascii.unhexlify('%x' % size)[::-1]
+        elif size > 0xfc and size <= 0xffff:
+                return b'\xfd' + binascii.unhexlify('%04x' % size)[::-1]
+        elif size > 0xffff and size <= 0xffffffff:
+                return b'\xfe' + binascii.unhexlify('%08x' % size)[::-1]
+        else:
+                return b'\xff' + binascii.unhexlify('%016x' % size)[::-1]
 
 def getCountBytes(mptr: io.BytesIO):
         mptr_read = mptr.read(1)
@@ -187,35 +198,84 @@ def sigcheck(sig_b: bytes, pubkey_b: bytes, raw_txn_b: bytes):
                 print('sigcheck: Bad Signature')
                 return 0
 
-def getTxnSigned(txn: bytes, sighash_type: int, input_index: int, script: bytes):
-        txn_signed_b = None
+def hashPrevOuts(txn: bytes, sighash_type: int):
+        prevouts = b''
         if sighash_type == g_script_sig_dict['SIGHASH_ALL']:
-                txn_signed_b = txn['version']
-                if 'is_segwit' in txn:
-                        txn_signed_b += b'\x00' + txn['is_segwit']
-                txn_signed_b += txn['input_count']
-                for index in range(getCount(txn['input_count'])):
-                        txn_signed_b += txn['input'][index]['prev_txn_hash']
-                        txn_signed_b += txn['input'][index]['prev_txn_out_index']
-                        if input_index == index:
-#                                txn_signed_b += txn['input'][index]['lock_script_size']
-#                                txn_signed_b += txn['input'][index]['lock_script']
-                                txn_signed_b += bytes([len(script)])
-                                txn_signed_b += script
-                        else:
-                                txn_signed_b += b'\x00'
-                        txn_signed_b += txn['input'][index]['sequence']
-                txn_signed_b += txn['out_count']
-                for index in range(getCount(txn['out_count'])):
-                        txn_signed_b += txn['out'][index]['satoshis']
-                        txn_signed_b += txn['out'][index]['scriptpubkey_size']
-                        txn_signed_b += txn['out'][index]['scriptpubkey']
-                txn_signed_b += txn['locktime']
-                txn_signed_b += binascii.unhexlify('%08x' % g_script_sig_dict['SIGHASH_ALL'])[::-1]
+                for txn_input in txn['input']:
+                        prevouts += txn_input['prev_txn_hash']
+                        prevouts += txn_input['prev_txn_out_index']
+
+        print('prevouts = %s' % bytes.decode(binascii.hexlify(prevouts)))
+        hash_prevouts = hash256(prevouts)
+        print('hash(prevouts) = %s' % bytes.decode(binascii.hexlify(hash_prevouts)))
+        return hash_prevouts
+
+def hashSequence(txn: bytes, sighash_type: int):
+        sequence = b''
+        if sighash_type == g_script_sig_dict['SIGHASH_ALL']:
+                for txn_input in txn['input']:
+                        sequence += txn_input['sequence']
+
+        hash_sequence = hash256(sequence)
+        return hash_sequence
+
+def hashOutputs(txn: bytes, sighash_type: int):
+        outputs = b''
+        if sighash_type == g_script_sig_dict['SIGHASH_ALL']:
+                for txn_out in txn['out']:
+                        outputs += txn_out['satoshis']
+                        outputs += txn_out['scriptpubkey_size']
+                        outputs += txn_out['scriptpubkey']
+
+        hash_outputs = hash256(outputs)
+        return hash_outputs
+
+def getTxnSigned(txn: bytes, sighash_type: int, input_index: int, script: bytes, is_witness: bool):
+        txn_signed_b = None
+        if is_witness == False:
+                if sighash_type == g_script_sig_dict['SIGHASH_ALL']:
+                        txn_signed_b = txn['version']
+        #                if 'is_segwit' in txn:
+        #                        txn_signed_b += b'\x00' + txn['is_segwit']
+                        txn_signed_b += txn['input_count']
+                        for index in range(getCount(txn['input_count'])):
+                                txn_signed_b += txn['input'][index]['prev_txn_hash']
+                                txn_signed_b += txn['input'][index]['prev_txn_out_index']
+                                if input_index == index:
+        #                                txn_signed_b += txn['input'][index]['lock_script_size']
+        #                                txn_signed_b += txn['input'][index]['lock_script']
+                                        txn_signed_b += bytes([len(script)])
+                                        txn_signed_b += script
+                                else:
+                                        txn_signed_b += b'\x00'
+                                txn_signed_b += txn['input'][index]['sequence']
+                        txn_signed_b += txn['out_count']
+                        for index in range(getCount(txn['out_count'])):
+                                txn_signed_b += txn['out'][index]['satoshis']
+                                txn_signed_b += txn['out'][index]['scriptpubkey_size']
+                                txn_signed_b += txn['out'][index]['scriptpubkey']
+                        txn_signed_b += txn['locktime']
+                        txn_signed_b += binascii.unhexlify('%08x' % g_script_sig_dict['SIGHASH_ALL'])[::-1]
+        else:
+                if sighash_type == g_script_sig_dict['SIGHASH_ALL']:
+                        print('SIGHASH_ALL for witness')
+                        txn_signed_b = txn['version']
+                        txn_signed_b += hashPrevOuts(txn, sighash_type)
+                        txn_signed_b += hashSequence(txn, sighash_type)
+                        txn_signed_b += txn['input'][input_index]['prev_txn_hash']
+                        txn_signed_b += txn['input'][input_index]['prev_txn_out_index']
+                        txn_signed_b += encodeVarInt(len(script))
+                        txn_signed_b += script
+                        txn_signed_b += txn['input'][input_index]['satoshis']
+                        txn_signed_b += txn['input'][input_index]['sequence']
+                        txn_signed_b += hashOutputs(txn, sighash_type)
+                        txn_signed_b += txn['locktime']
+                        txn_signed_b += binascii.unhexlify('%08x' % g_script_sig_dict['SIGHASH_ALL'])[::-1]
+                
         print('txn_signed = %s' % bytes.decode(binascii.hexlify(txn_signed_b)))
         return txn_signed_b
 
-def executeScript(script: bytes, stack: list, txn: bytes, input_index: int):
+def executeScript(script: bytes, stack: list, txn: bytes, input_index: int, is_witness: bool):
         global g_multisig_counter
         script_len = len(script)
         script_ptr = io.BytesIO(script)
@@ -522,7 +582,7 @@ def executeScript(script: bytes, stack: list, txn: bytes, input_index: int):
                         pubkey_b = stack.pop()
                         complete_sig_b = stack.pop()
                         r, s, sighash_type = splitSig(complete_sig_b)
-                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script)
+                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script, is_witness)
                         sig_b = r + s
                         is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
                         stack.append(is_valid)
@@ -531,7 +591,7 @@ def executeScript(script: bytes, stack: list, txn: bytes, input_index: int):
                         pubkey_b = stack.pop()
                         complete_sig_b = stack.pop() # this is R, S and sig_type
                         r, s, sighash_type = splitSig(complete_sig_b)
-                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script)
+                        txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script, is_witness)
                         sig_b = r + s
                         is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
                         if is_valid == 0:
@@ -562,7 +622,7 @@ def executeScript(script: bytes, stack: list, txn: bytes, input_index: int):
                                         print('type of sig = %s, type of pubkey = %s' % (type(complete_sig_b), type(pubkey_b)))
                                         return False
                                 r, s, sighash_type = splitSig(complete_sig_b)
-                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script)
+                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script, is_witness)
                                 sig_b = r + s
                                 is_valid_sig = sigcheck(sig_b, pubkey_b, txn_signed_b)
                                 if is_valid_sig == 1:
@@ -601,7 +661,7 @@ def executeScript(script: bytes, stack: list, txn: bytes, input_index: int):
                                         print('type of sig = %s, type of pubkey = %s' % (type(complete_sig_b), type(pubkey_b)))
                                         return False
                                 r, s, sighash_type = splitSig(complete_sig_b)
-                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script)
+                                txn_signed_b =  getTxnSigned(txn, sighash_type, input_index, script, is_witness)
                                 sig_b = r + s
                                 is_valid_sig = sigcheck(sig_b, pubkey_b, txn_signed_b)
                                 if is_valid_sig == 1:
@@ -675,7 +735,7 @@ def verifyWitnessProgram(witness_stack: list, witness_version: int, witness_prog
         if witness_version != 0:
                 return False
         if len(witness_program) == WITNESS_V0_P2SH_SIZE:
-                scriptPubKey = witness_stack.pop()
+                scriptPubKey = witness_stack[-1]
                 hashScriptPubKey = hashlib.sha256(scriptPubKey).digest()
                 print('scriptPubKey = %s' % bytes.decode(binascii.hexlify(scriptPubKey)))
                 print('witness_program = %s' % bytes.decode(binascii.hexlify(witness_program)))
@@ -684,23 +744,28 @@ def verifyWitnessProgram(witness_stack: list, witness_version: int, witness_prog
                         print('WPSH: Matched')
                 else:
                         return False
+                stack = copy.deepcopy(witness_stack[0:len(witness_stack) - 1])
         if len(witness_program) == WITNESS_V0_P2PKH_SIZE:
                 if len(witness_stack) != 2:
                         return False
                 print('WPKH: witness_program = %s' % bytes.decode(binascii.hexlify(witness_program)))
                 scriptPubKey = bytes([OP_DUP, OP_HASH160, witness_program, OP_EQUALVERIFY, OP_CHECKSIG])
                 print('WPKH: scriptPubKey = %s' % bytes.decode(binascii.hexlify(witness_program)))
+                stack = copy.deepcopy(witness_stack)
 
-        stack = copy.deepcopy(witness_stack)
-        stack = executeScript(scriptPubKey, stack, txn, input_index)
+        print('STACK::')
+        for block in stack:
+                print(bytes.decode(binascii.hexlify(block)))
+        stack = executeScript(scriptPubKey, stack, txn, input_index, is_witness=True)
 
         if len(stack) == 1 and stack[-1] == True:
                 stack.pop()
         else:
                 print('execute redeem script failed')
                 return False
+        return True
 
-def verifyScript(txn: dict, input_index: int):
+def verifyScript(txn: dict, input_index: int, is_witness: bool):
         unlock_script = txn['input'][input_index]['unlock_script']
         lock_script = txn['input'][input_index]['lock_script']
 
@@ -710,7 +775,7 @@ def verifyScript(txn: dict, input_index: int):
         stack = []
 
         # execute unlock script
-        stack = executeScript(unlock_script, stack, txn, input_index)
+        stack = executeScript(unlock_script, stack, txn, input_index, is_witness=is_witness)
 
         if len(stack) > 0 and stack[-1] == True:
                 stack.pop()
@@ -724,18 +789,19 @@ def verifyScript(txn: dict, input_index: int):
         is_p2sh = isP2SH(lock_script)
 
         # execute lock script
-        stack = executeScript(lock_script, stack, txn, input_index)
+        stack = executeScript(lock_script, stack, txn, input_index, is_witness=is_witness)
 
-        witness_flag = 'is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1
+#        witness_flag = 'is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1
 
-        if witness_flag == True and isWitnessProgram(lock_script):
+        if is_witness == True and isWitnessProgram(lock_script):
                 print("Witness Program")
                 witness_version = script_utils.decodeOpN(lock_script[0])
                 witness_program = lock_script[2:]
                 witness_stack = copy.deepcopy(txn['input'][input_index]['witness'])
                 print('witness_stack = %s' % witness_stack)
                 print('witness stack size = %s' % txn['input'][input_index]['witness_count'])
-                verifyWitnessProgram(witness_stack, witness_version, witness_program, txn, input_index)
+                status = verifyWitnessProgram(witness_stack, witness_version, witness_program, txn, input_index)
+                print('Witness script passed')
 
         if is_p2sh == False:
                 print('Script is not P2SH')
@@ -759,17 +825,13 @@ def verifyScript(txn: dict, input_index: int):
                 stack = stack_copy
 
                 redeem_script = stack.pop()
-                stack = executeScript(redeem_script, stack, txn, input_index)
+                stack = executeScript(redeem_script, stack, txn, input_index, is_witness=is_witness)
 
                 if len(stack) == 1 and stack[-1] == True:
                         stack.pop()
                 else:
                         print('execute redeem script failed')
                         return False
-
-        if 'is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1:
-                print('Segwit Transaction')
-                exit()
 
         return True
 
@@ -832,7 +894,8 @@ def get_prev_txn_info(prev_txn_hash_bigendian: str, prev_txn_out_index: int):
                                 skip_script_size = int(binascii.hexlify(txnfp.read(1)), 16)
                                 skip_script = txnfp.read(skip_script_size)
                                 continue
-                        satoshis = int(binascii.hexlify(txnfp.read(8)[::-1]), 16)
+#                        satoshis = int(binascii.hexlify(txnfp.read(8)[::-1]), 16)
+                        satoshis = txnfp.read(8)
                         lock_script_size_b = getCountBytes(txnfp)
                         lock_script_size = getCount(lock_script_size_b)
                         lock_script = txnfp.read(lock_script_size)
@@ -871,7 +934,7 @@ def unlockTxn(mptr: mmap):
                 unlock_script_size = getCount(txn_input['unlock_script_size'])
                 txn_input['unlock_script'] = mptr.read(unlock_script_size)
                 txn_input['lock_script'], txn_input['lock_script_size'], txn_input['satoshis'] = get_prev_txn_info(txn_input['prev_txn_hash'], prev_txn_out_index)
-                print('lock_script = %s, lock_script_size = %d, satoshis = %d' % (bytes.decode(binascii.hexlify(txn_input['lock_script'])), getCount(txn_input['lock_script_size']), txn_input['satoshis']))
+                print('lock_script = %s, lock_script_size = %d, satoshis = %d' % (bytes.decode(binascii.hexlify(txn_input['lock_script'])), getCount(txn_input['lock_script_size']), int(binascii.hexlify(txn_input['satoshis'][::-1]), 16)))
                 txn_input['sequence'] = mptr.read(4)
                 txn['input'].append(txn_input)
         txn['out_count'] = getCountBytes(mptr)
@@ -885,7 +948,8 @@ def unlockTxn(mptr: mmap):
                 scriptpubkey_size = getCount(txn_out['scriptpubkey_size'])
                 txn_out['scriptpubkey'] = mptr.read(scriptpubkey_size)
                 txn['out'].append(txn_out)
-        if 'is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1:
+        is_witness = ('is_segwit' in txn and int(binascii.hexlify(txn['is_segwit']), 16) == 1)
+        if is_witness == True:
                 print('YYYYYYYYYYYYYYYYYYYYYYYYYYY inside segwit')
                 for index in range(input_count):
                         txn['input'][index]['witness_count'] = getCountBytes(mptr)
@@ -896,11 +960,11 @@ def unlockTxn(mptr: mmap):
                                 witness_size = getCount(getCountBytes(mptr))
                                 txn['input'][index]['witness'].append(mptr.read(witness_size))
         txn['locktime'] = mptr.read(4)
-        input_satoshis = sum(txn_input['satoshis'] for txn_input in txn['input'])
+        input_satoshis = sum(int(binascii.hexlify(txn_input['satoshis'][::-1]), 16) for txn_input in txn['input'])
         out_satoshis = sum(int(binascii.hexlify(txn_out['satoshis'][::-1]), 16) for txn_out in txn['out'])
         print('Network fees = %d' % (input_satoshis - out_satoshis))
         for index in range(input_count):
-                status = verifyScript(txn, index)
+                status = verifyScript(txn, index, is_witness)
                 print ('status = %s' % status)
                 if status == False:
                         print('Invalid Transaction')
@@ -960,5 +1024,60 @@ if __name__ == '__main__':
                 else:
                         print('Valid Transaction')
 
-        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
-        validate_all_transactions_of_block(block_hash_bigendian_b)
+#        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
+#        validate_all_transactions_of_block(block_hash_bigendian_b)
+# P2SH-P2WSH
+        prev_txn = '1b1ff08554033f9bbaabf2573935caf5a20838e5b950be7658576b09a82ece0f'
+        prev_outindex = '07000000'
+        prevouts = prev_txn + prev_outindex
+        prevouts_b = binascii.unhexlify(prevouts)
+        print('previous txnid = %s' % bytes.decode(binascii.hexlify(binascii.unhexlify(prev_txn)[::-1])))
+        hashPrevouts = hash256(prevouts_b)
+
+        sequence = 'ffffffff'
+        sequence_b = binascii.unhexlify(sequence)
+        hashSequence = hash256(sequence_b)
+
+        outputs = '4021d000000000001976a9142cbe180b31c771d1fc05be6be1ffbfd76259382f88acf09c0900000000001976a914e49cd22f16302886f3f66040a1ab2d998c78b2bb88acc0ec4f1c000000001976a91404c3ee0e4549ccb0ed0fffc8528dc2df7517a87d88ac804f12000000000017a91469f374873cd7b681dc1f21ee6d1b381d6a5ac0988780841e000000000017a914eaac0372cd3083c7b9147def37cccfd91c783c7787a887ca000000000017a9144061ccd8877845764399ad0b88722d24b959b44787004fb406000000001976a9142b81e68a154e013cdd7421ac6738cc85b93bfbe388acb0b63e000000000017a91469f37525851e28b1e0c17d5e6eb891595d88104e8790e31300000000001976a914c985b30155adfed8222a5e2fef8fb01cecdfb61488ac38076e1600000000220020701a8d401c84fb13e6baf169d59684e17abd9fa216c8cc5b9fc63d622ff8c58d'
+        outputs_b = binascii.unhexlify(outputs)
+        hashOutputs = hash256(outputs_b)
+
+        version = '01000000'
+        version_b = binascii.unhexlify(version)
+
+        outpoint='1b1ff08554033f9bbaabf2573935caf5a20838e5b950be7658576b09a82ece0f07000000'
+        outpoint_b = binascii.unhexlify(outpoint)
+
+        scriptCode = '6952210375e00eb72e29da82b89367947f29ef34afb75e8654f6ea368e0acdfd92976b7c2103a1b26313f430c4b15bb1fdce663207659d8cac749a0e53d70eff01874496feff2103c96d495bfdd5ba4145e3e046fee45e84a8a48ad05bd8dbb395c011a32cf9f88053ae'
+        scriptCode_b = binascii.unhexlify(scriptCode)
+
+#        amount_int = 1000000000
+#        amount_hex = '%x' % amount_int
+#        amount_b = binascii.unhexlify(amount_hex)[::-1]
+#        print('amount_hex = %s' % amount_hex)
+#        print('amount = %s' % bytes.decode(binascii.hexlify(amount_b)))
+        amount = '00ca9a3b00000000'
+        amount_b = binascii.unhexlify(amount)
+
+        locktime = '00000000'
+        locktime_b = binascii.unhexlify(locktime)
+
+        hashtype = '01000000'
+        hashtype_b = binascii.unhexlify(hashtype)
+
+        txn_signed_b = version_b + hashPrevouts + hashSequence + outpoint_b + scriptCode_b + amount_b + sequence_b + hashOutputs + locktime_b + hashtype_b
+        print('txn_signed = %s' % bytes.decode(binascii.hexlify(txn_signed_b)))
+
+        complete_sig = '3045022100faa18bdbb4c5e82cfe0424d30d0d1546bd8c5633f180f6f01bd610f0f66ea98e02205f43ca24bcbe458c784230af96ed0287a2f16e102fd1fb1043f3359e224c40ca01'
+        complete_sig_b = binascii.unhexlify(complete_sig)
+        r, s, sighash_type = splitSig(complete_sig_b)
+        sig_b = r + s
+
+        pubkey = '0375e00eb72e29da82b89367947f29ef34afb75e8654f6ea368e0acdfd92976b7c' # 1
+#        pubkey = '03a1b26313f430c4b15bb1fdce663207659d8cac749a0e53d70eff01874496feff' # 2 
+#        pubkey = '03c96d495bfdd5ba4145e3e046fee45e84a8a48ad05bd8dbb395c011a32cf9f880' # 3
+        pubkey_b = binascii.unhexlify(pubkey)
+
+        
+        is_valid = sigcheck(sig_b, pubkey_b, txn_signed_b)
+        print('is_valid = %d' % is_valid)
