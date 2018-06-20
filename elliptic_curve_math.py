@@ -17,21 +17,18 @@ class EllipticCurveMath:
                 g, y, x = self.egcd(b % a, a)
                 return (g, x - (b // a) * y, y)
 
-        def modinv(self, a, p):
-            if a < 0 or a >= p: a = a % p
-            c, d, uc, vc, ud, vd = a, p, 1, 0, 0, 1
-            while c:
-                q, c, d = divmod(d, c) + (c,)
-                uc, vc, ud, vd = ud - q*uc, vd - q*vc, uc, vc
-            if ud > 0: return ud
-            return ud + p
+        # http://adrenaline2017.hatenablog.com/entry/2017/03/21/212611
+        def modinv(self, a, n):
+            if a == 0:
+                return 0
+            lm, hm = 1, 0
+            low, high = a % n, n
+            while low > 1:
+                r = high//low
+                nm, new = hm-lm*r, high-low*r
+                lm, low, hm, high = nm, new, lm, low
+            return lm % n 
 
-#        def modinv(self, a, m):
-#            g, x, y = self.egcd(a, m)
-#            if g != 1:
-#                raise Exception('modular inverse does not exist')
-#            else:
-#                return x % m
         # ]
 
         # Elliptic curve calculation [
@@ -87,7 +84,6 @@ class EllipticCurveMath:
 #        print(m)
 
 if __name__ == '__main__':
-        elliptic = EllipticCurveMath((0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798, 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8))
-        elliptic.setVars(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141, 0, 7)
+        elliptic = EllipticCurveMath((0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798, 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8), 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141, 0, 7)
         m = elliptic.scalarMultiplicationOp((0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798, 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8), 0x18E14A7B6A307F426A94F8114701E7C8E774E7F9A47E2C2035DB29A206321725)
         print('04 %x %x' % (m[0], m[1]))

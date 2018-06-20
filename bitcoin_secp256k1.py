@@ -22,10 +22,10 @@ class BitcoinSec256k1:
         def __init__(self):
                 self.elliptic = EllipticCurveMath(self.G, self.P, self.N, 0, 7)
 
-        def privkey2pubkey(self, G, k: int):
-                return self.elliptic.scalarMultiplicationOp(G, k)
+        def privkey2pubkey(self, k: int):
+                return self.elliptic.scalarMultiplicationOp(self.G, k)
 
 if __name__ == '__main__':
         bitcoin_sec256k1 = BitcoinSec256k1()
-        pubkey = bitcoin_sec256k1.privkey2pubkey(bitcoin_sec256k1.G, 0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725)
+        pubkey = bitcoin_sec256k1.privkey2pubkey(0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725)
         print('04 %x %x' % (pubkey[0], pubkey[1]))
