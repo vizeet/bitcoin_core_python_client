@@ -1,3 +1,4 @@
+# https://www.coindesk.com/math-behind-bitcoin/
 class EllipticCurveMath:
         # G: Generation Point
         # P: Field Prime
