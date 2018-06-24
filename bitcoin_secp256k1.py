@@ -1,4 +1,5 @@
 from elliptic_curve_math import EllipticCurveMath
+import binascii
 
 class BitcoinSec256k1:
         # Bitcoin Secp256k1 constants [
@@ -22,10 +23,25 @@ class BitcoinSec256k1:
         def __init__(self):
                 self.elliptic = EllipticCurveMath(self.G, self.P, self.N, 0, 7)
 
-        def privkey2pubkey(self, k: int):
-                return self.elliptic.scalarMultiplicationOp(self.G, k)
+        def privkey2pubkey(self, k: int, compress: bool):
+                K = self.elliptic.scalarMultiplicationOp(self.G, k)
+                if compress == False:
+                        print('04%x%x' % (K[0], K[1]))
+                        pubkey = b'\x04' + binascii.unhexlify(str('%064x' % K[0])) + binascii.unhexlify(str('%064x' % K[1]))
+                        print(pubkey)
+                        return pubkey
+                else:
+                        if K[1] % 2 == 0: # even
+                                print('02%x' % K[0])
+                                pubkey = b'\x02' + binascii.unhexlify(str('%032x' % K[0]))
+                                return pubkey
+                        else:
+                                print('03%x' % K[0])
+                                pubkey = b'\x03' + binascii.unhexlify(str('%032x' % K[0]))
+                                return pubkey
 
 if __name__ == '__main__':
+
         bitcoin_sec256k1 = BitcoinSec256k1()
-        pubkey = bitcoin_sec256k1.privkey2pubkey(0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725)
-        print('04 %x %x' % (pubkey[0], pubkey[1]))
+        pubkey = bitcoin_sec256k1.privkey2pubkey(0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725, True)
+        print('pubkey = %s' % bytes.decode(binascii.hexlify(pubkey)))

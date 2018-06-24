@@ -66,13 +66,13 @@ class EllipticCurveMath:
                                 m = p
                                 for i in range(1, n + 1):
                                         m = self.pointDoublingOp(m)
-                                        print('doubling')
+#                                        print('doubling')
                                 if val is None:
                                         val = m
                                 else:
                                         val = self.pointAddingOp(val, m)
-                                        print('adding')
-                        print ('n = %d, b = %d' % (n, b))
+#                                        print('adding')
+#                        print ('n = %d, b = %d' % (n, b))
                         s = s >> 1
                         n += 1
                 return val
