@@ -1,8 +1,13 @@
+import hashlib
+import binascii
 
 g_alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 g_base_count = len(g_alphabet)
 
-def base58_encode(num):
+def hash256(bstr):
+    return hashlib.sha256(hashlib.sha256(bstr).digest()).digest()
+
+def base58_encode(num: int):
         global g_alphabet, g_base_count
         """ Returns num in a base58-encoded string """
         encode = ''
@@ -15,12 +20,12 @@ def base58_encode(num):
                 encode = g_alphabet[mod] + encode
                 num = num // g_base_count
 
-        if (num):
+        if (num >= 0):
                 encode = g_alphabet[num] + encode
 
         return encode
 
-def base58_decode(s):
+def base58_decode(s: str):
         global g_alphabet, g_base_count
         """ Decodes the base58-encoded string s into an integer """
         decoded = 0
@@ -31,6 +36,21 @@ def base58_decode(s):
                 multi = multi * g_base_count
                 
         return decoded
+
+def base58checkEncode(prefix: bytes, h: bytes):
+        with_prefix = prefix + h
+        print('with prefx = %s' % bytes.decode(binascii.hexlify(with_prefix)))
+        with_checksum = with_prefix + hash256(with_prefix)[0:4]
+        print('with prefx and checksum = %s' % bytes.decode(binascii.hexlify(with_checksum)))
+        print('with prefix and checksum int = %x' % int(binascii.hexlify(with_checksum), 16))
+        encode = base58_encode(int(binascii.hexlify(with_checksum[1:]), 16))
+#        encoded_prefix = base58_encode(int(binascii.hexlify(prefix), 16))
+        encoded_prefix = base58_encode(0)
+        print('encoded prefix = %s' % encoded_prefix)
+        return encoded_prefix + encode
+
+def base58checkVerify():
+        pass
 
 if __name__ == '__main__':
 #        b58_str = 'xprv9s21ZrQH143K2fpGDeSiVghhRbX6YY7yUZ78Ng644PevUa8YKHAYJAg9CCbzkXdZvKZ8Xevajm9rcfYU974Ed86rFzvE58Yq8DdYuAZso5d'

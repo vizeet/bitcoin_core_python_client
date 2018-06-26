@@ -5,14 +5,12 @@ import pbkdf2
 import binascii
 import optparse
 import sys
-from bitcoin_secp256k1 import BitcoinSec256k1
+import bitcoin_secp256k1
 from base58 import base58_decode, base58_encode
+import pubkey_address 
 
 # implementation of BIP32
 # mainnet: 0x0488B21E public, 0x0488ADE4 private; testnet: 0x043587CF public, 0x04358394 private
-
-P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
-N = (1 << 256) - 0x14551231950B75FC4402DA1732FC9BEBF
 
 def hash160(secret: bytes):
         secrethash = hashlib.sha256(secret).digest()
@@ -23,7 +21,6 @@ def hash160(secret: bytes):
 
 def generateSeedFromStr(code: str, salt: str):
         seed = pbkdf2.pbkdf2(hashlib.sha512, code, salt, 2048, 64)
-#        seed = pbkdf2.pbkdf2(hashlib.sha256, code, salt, 50000, 64)
         print('seed = %s' % bytes.decode(binascii.hexlify(seed)))
         return seed
 
@@ -32,25 +29,6 @@ def generateMasterKeys(seed: bytes):
         private_key = int(binascii.hexlify(h[0:32]), 16)
         chaincode = h[32:64]
         return private_key, chaincode
-
-#def base58_encode(num):
-#        """ Returns num in a base58-encoded string """
-#        alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-#        base_count = len(alphabet)
-#        encode = ''
-#        
-#        if (num < 0):
-#                return ''
-#        
-#        while (num >= base_count):      
-#                mod = num % base_count
-#                encode = alphabet[mod] + encode
-#                num = num // base_count
-#
-#        if (num):
-#                encode = alphabet[num] + encode
-#
-#        return encode
 
 def encodedSerializationKeys(key: int, chaincode: bytes, depth: int, is_private: bool, is_mainnet: bool, child_index=0, parent_key=0):
         if is_private == True:
@@ -82,7 +60,6 @@ def encodedSerializationKeys(key: int, chaincode: bytes, depth: int, is_private:
         return encoded_serialized_key
 
 def generateChildAtIndex(privkey: int, chaincode: bytes, index: int):
-        global N
         if index >= (1<<31):
                 # hardened
                 print('hardened')
@@ -91,11 +68,10 @@ def generateChildAtIndex(privkey: int, chaincode: bytes, index: int):
                 print('h = %s' % bytes.decode(binascii.hexlify(h)))
         else:
                 # normal
-                bitcoin_sec256k1 = BitcoinSec256k1()
-                pubkey = bitcoin_sec256k1.privkey2pubkey(privkey, True)
+                pubkey = pubkey_address.privkey2pubkey(privkey, True)
                 print('pubkey = %s' % bytes.decode(binascii.hexlify(pubkey)))
                 h = hmac.new(chaincode, pubkey + binascii.unhexlify('%08x' % index), hashlib.sha512).digest()
-        childprivkey = (int(binascii.hexlify(h[0:32]), 16) + privkey) % N
+        childprivkey = (int(binascii.hexlify(h[0:32]), 16) + privkey) % bitcoin_secp256k1.N
         print('h[0:32] = %x' % int(binascii.hexlify(h[0:32]), 16))
         print('privkey = %x' % privkey)
         child_chaincode = h[32:64]
