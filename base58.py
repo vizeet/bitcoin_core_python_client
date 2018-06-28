@@ -42,12 +42,13 @@ def base58checkEncode(prefix: bytes, h: bytes):
         print('with prefx = %s' % bytes.decode(binascii.hexlify(with_prefix)))
         with_checksum = with_prefix + hash256(with_prefix)[0:4]
         print('with prefx and checksum = %s' % bytes.decode(binascii.hexlify(with_checksum)))
-        print('with prefix and checksum int = %x' % int(binascii.hexlify(with_checksum), 16))
-        encode = base58_encode(int(binascii.hexlify(with_checksum[1:]), 16))
-#        encoded_prefix = base58_encode(int(binascii.hexlify(prefix), 16))
-        encoded_prefix = base58_encode(0)
-        print('encoded prefix = %s' % encoded_prefix)
-        return encoded_prefix + encode
+        print('with prefix and checksum int = %x' % int(binascii.hexlify(with_checksum[1:]), 16))
+        encode = base58_encode(int(binascii.hexlify(with_checksum), 16))
+        if prefix == b'\x00':
+                encoded_prefix = base58_encode(0)
+                encode = encoded_prefix + encode
+        print('encoded base58 = %s' % encode)
+        return encode
 
 def base58checkVerify():
         pass

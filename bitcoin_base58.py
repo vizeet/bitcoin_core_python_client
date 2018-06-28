@@ -25,3 +25,9 @@ def forAddress(h: bytes, is_testnet: bool, is_script: bool):
         print('address prefix before encoding = %02x' % prefix)
         address = base58.base58checkEncode(binascii.unhexlify('%02x' % prefix), h)
         return address
+
+def forWifPrivkey(h: bytes, is_testnet: bool, for_compressed_pubkey: bool):
+        prefix = base58_prefixes[("Mainnet", "Testnet")[is_testnet == True]][("WIF_Uncompressed", "WIF_Compressed")[for_compressed_pubkey == True]]
+        print('wif prefix before encoding = %02x' % prefix)
+        wif_encoded = base58.base58checkEncode(binascii.unhexlify('%02x' % prefix), h)
+        return wif_encoded
