@@ -2,7 +2,8 @@ import bitcoin_secp256k1
 from bitcoin_secp256k1 import P
 import binascii
 import bitcoin_base58
-import hashlib
+import base58
+import hash_utils
 
 def compressPubkey(pubkey: bytes):
         x_b = pubkey[1:33]
@@ -40,26 +41,24 @@ def uncompressPubkey(x_b: bytes):
         full_pubkey_b = b''.join([b'\x04', x_b, y_b])
         return full_pubkey_b
 
-def hash160(secret: bytes):
-        secrethash = hashlib.sha256(secret).digest()
-        h = hashlib.new('ripemd160')
-        h.update(secrethash)
-        secret_hash160 = h.digest()
-        return secret_hash160
-
 def pubkey2address(pubkey: bytes, is_testnet: bool):
-        pkh = hash160(pubkey)
+        pkh = hash_utils.hash160(pubkey)
         print('pkh = %s' % bytes.decode(binascii.hexlify(pkh)))
         address = bitcoin_base58.forAddress(pkh, is_testnet, False)
         return address
 
-def redeemScript2address(script: bytes, is_testnet: bool):
-        sh = hash160(script)
+def sh2address(sh: bytes, is_testnet: bool):
         address = bitcoin_base58.forAddress(sh, is_testnet, True)
         return address
 
-def addressCheckVerify(address: str):
-        pass
+def redeemScript2address(script: bytes, is_testnet: bool):
+        sh = hash_utils.hash160(script)
+        address = bitcoin_base58.forAddress(sh, is_testnet, True)
+        return address
+
+def addressCheckVerify(address: str, is_testnet: bool, is_script: bool):
+        is_valid = bitcoin_base58.addressVerify(address, is_testnet, is_script)
+        return is_valid
 
 if __name__ == '__main__':
         pubkey = privkey2pubkey(0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725, False)
@@ -70,3 +69,8 @@ if __name__ == '__main__':
         print('address = %s' % address)
         pubkey = uncompressPubkey(pubkey)
         print ('uncompressed pubkey = %s' % bytes.decode(binascii.hexlify(pubkey)))
+        is_valid = addressCheckVerify(address, False, False)
+        print('Is Address valid: %r' % is_valid)
+        h160 = 'e9c3dd0c07aac76179ebc76a6c78d4d67c6c160a'
+        address = sh2address(binascii.unhexlify(h160), False)
+        print ('P2SH address = %s' % address)

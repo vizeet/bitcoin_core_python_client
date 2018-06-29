@@ -50,8 +50,19 @@ def base58checkEncode(prefix: bytes, h: bytes):
         print('encoded base58 = %s' % encode)
         return encode
 
-def base58checkVerify():
-        pass
+def base58checkVerify(prefix: bytes, val: str):
+        decoded_val = base58_decode(val)
+        postfix = binascii.unhexlify('%x' % decoded_val)[-4:]
+        print('hash from value = %s' % bytes.decode(binascii.hexlify(postfix)))
+        val_without_postfix = binascii.unhexlify('%x' % decoded_val)[0:-4]
+        print('value = %s' % bytes.decode(binascii.hexlify(val_without_postfix)))
+        val_with_prefix = prefix + val_without_postfix
+        print('value = %s' % bytes.decode(binascii.hexlify(val_with_prefix)))
+        h = hash256(val_with_prefix)[0:4]
+        print('hash of value = %s' % bytes.decode(binascii.hexlify(h)))
+        if h == postfix:
+                return True
+        return False
 
 if __name__ == '__main__':
 #        b58_str = 'xprv9s21ZrQH143K2fpGDeSiVghhRbX6YY7yUZ78Ng644PevUa8YKHAYJAg9CCbzkXdZvKZ8Xevajm9rcfYU974Ed86rFzvE58Yq8DdYuAZso5d'

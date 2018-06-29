@@ -77,6 +77,23 @@ def generateChildAtIndex(privkey: int, chaincode: bytes, index: int):
         child_chaincode = h[32:64]
         return childprivkey, child_chaincode
 
+def generatePrivkeyPubkeyPair(keypath: str, seed: bytes, compressed: bool):
+        keypath_list = keypath.replace(' ', '').split('/')
+        print(keypath_list)
+        if keypath_list[0] != 'm':
+                return None
+        for key in keypath_list:
+                if key == 'm':
+                        privkey, chaincode = generateMasterKeys(seed)
+                else:
+                        if "'" in key:
+                                index = int(key[:-1]) + (1<<31)
+                        else:
+                                index = int(key)
+                        privkey, chaincode = generateChildAtIndex(privkey, chaincode, index)
+        pubkey = pubkey_address.privkey2pubkey(privkey, compressed)
+        return privkey, pubkey
+
 if __name__ == '__main__':
         parser = optparse.OptionParser(usage="python3 hd_wallet.py -s <Salt>")
         parser.add_option('-s', '--salt', action='store', dest='salt', help='Add salt to secret')
@@ -105,3 +122,6 @@ if __name__ == '__main__':
         # for normal
         child_privkey, child_chaincode = generateChildAtIndex(master_privkey, master_chaincode, 0)
         print('child private key = %x, child chaincode = %s' % (child_privkey, bytes.decode(binascii.hexlify(child_chaincode))))
+
+        privkey, chaincode = generatePrivkeyPubkeyPair('m / 5\'/ 6', seed, True)
+        print('keys at m / 5\'/6: private key = %x, chaincode = %s' % (privkey, bytes.decode(binascii.hexlify(chaincode))))
