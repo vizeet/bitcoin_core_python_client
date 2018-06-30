@@ -20,15 +20,34 @@ base58_prefixes = {
         }
 }
 
+address_prefixes = {
+        "Mainnet": {
+                "PKH": "1",
+                "SH": "3",
+                "WIF_Uncompressed": 0x80,
+                "WIF_Compressed": 0x80,
+                "BIP32_Pubkey": 0x0488B21E,
+                "BIP32_Privkey": 0x0488ADE4
+        },
+        "Testnet": {
+                "PKH": "m",
+                "SH": "2",
+                "WIF_Uncompressed": 0xEF,
+                "WIF_Compressed": 0xEF,
+                "BIP32_Pubkey": 0x043587CF,
+                "BIP32_Privkey": 0x04358394
+        }
+}
+
 def forAddress(h: bytes, is_testnet: bool, is_script: bool):
         prefix = base58_prefixes[("Mainnet", "Testnet")[is_testnet == True]][("PKH", "SH")[is_script == True]]
         print('address prefix before encoding = %02x' % prefix)
         address = base58.base58checkEncode(binascii.unhexlify('%02x' % prefix), h)
         return address
 
-def addressVerify(address: str, is_testnet: bool, is_script: bool):
-        prefix = base58_prefixes[("Mainnet", "Testnet")[is_testnet == True]][("PKH", "SH")[is_script == True]]
-        is_valid = base58.base58checkVerify(binascii.unhexlify('%02x' % prefix), address)
+def addressVerify(address: str):
+        prefix = address[0:1]
+        is_valid = base58.base58checkVerify(prefix, address)
         return is_valid
 
 def forWifPrivkey(h: bytes, is_testnet: bool, for_compressed_pubkey: bool):

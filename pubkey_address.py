@@ -4,6 +4,7 @@ import binascii
 import bitcoin_base58
 import base58
 import hash_utils
+import bitcoin_bech32
 
 def compressPubkey(pubkey: bytes):
         x_b = pubkey[1:33]
@@ -53,12 +54,19 @@ def sh2address(sh: bytes, is_testnet: bool):
 
 def redeemScript2address(script: bytes, is_testnet: bool):
         sh = hash_utils.hash160(script)
-        address = bitcoin_base58.forAddress(sh, is_testnet, True)
+        address = sh2address(sh, is_testnet)
         return address
 
-def addressCheckVerify(address: str, is_testnet: bool, is_script: bool):
-        is_valid = bitcoin_base58.addressVerify(address, is_testnet, is_script)
+def addressCheckVerify(address: str):
+        is_valid = False
+        if address[0] in ['1', '3', 'm', 'n', '2']:
+                is_valid = bitcoin_base58.addressVerify(address)
+        elif address[0:3] in ['bc1', 'tb1']:
+                is_valid = bitcoin_bech32.addressVerify(address)
         return is_valid
+
+def witnessProgram2address(hrp: str, witver: int, witprog: bytes):
+        return bitcoin_bech32.encode(hrp, witver, witprog)
 
 if __name__ == '__main__':
         pubkey = privkey2pubkey(0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725, False)
@@ -69,8 +77,20 @@ if __name__ == '__main__':
         print('address = %s' % address)
         pubkey = uncompressPubkey(pubkey)
         print ('uncompressed pubkey = %s' % bytes.decode(binascii.hexlify(pubkey)))
-        is_valid = addressCheckVerify(address, False, False)
+        is_valid = addressCheckVerify(address)
         print('Is Address valid: %r' % is_valid)
         h160 = 'e9c3dd0c07aac76179ebc76a6c78d4d67c6c160a'
         address = sh2address(binascii.unhexlify(h160), False)
         print ('P2SH address = %s' % address)
+        is_valid = addressCheckVerify(address)
+        print('Is Address valid: %r' % is_valid)
+        witprog = binascii.unhexlify('701a8d401c84fb13e6baf169d59684e17abd9fa216c8cc5b9fc63d622ff8c58d')
+        witver = 0x00
+        hrp = 'bc'
+        address = witnessProgram2address(hrp, witver, witprog)
+        print('WSH witness address = %s' % address)
+        witprog = binascii.unhexlify('04411aab1f36d417d6e96da77cc708d6c703f067')
+        witver = 0x00
+        hrp = 'bc'
+        address = witnessProgram2address(hrp, witver, witprog)
+        print('WPKH witness address = %s' % address)
