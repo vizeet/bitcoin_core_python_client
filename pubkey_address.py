@@ -68,6 +68,14 @@ def addressCheckVerify(address: str):
 def witnessProgram2address(hrp: str, witver: int, witprog: bytes):
         return bitcoin_bech32.encode(hrp, witver, witprog)
 
+def privkeyHex2Wif(privkey: int, is_testnet: bool, for_compressed_pubkey: bool):
+        wif = bitcoin_base58.encodeWifPrivkey(privkey, is_testnet, for_compressed_pubkey)
+        return wif
+
+def privkeyWif2Hex(privkey: str):
+        privkey, for_compressed_pubkey = bitcoin_base58.decodeWifPrivkey(privkey)
+        return privkey, for_compressed_pubkey
+
 if __name__ == '__main__':
         pubkey = privkey2pubkey(0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725, False)
         print ('Full pubkey = %s' % bytes.decode(binascii.hexlify(pubkey)))
@@ -94,3 +102,5 @@ if __name__ == '__main__':
         hrp = 'bc'
         address = witnessProgram2address(hrp, witver, witprog)
         print('WPKH witness address = %s' % address)
+        privkey_wif = privkeyHex2Wif(0xef235aacf90d9f4aadd8c92e4b2562e1d9eb97f0df9ba3b508258739cb013db2, False, True)
+        print('private key in WIF format = %s' % privkey_wif)

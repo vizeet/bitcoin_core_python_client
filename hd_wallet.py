@@ -91,6 +91,8 @@ def generatePrivkeyPubkeyPair(keypath: str, seed: bytes, compressed: bool):
                         else:
                                 index = int(key)
                         privkey, chaincode = generateChildAtIndex(privkey, chaincode, index)
+                print('key = %s' % key)
+                print('private key = %x, chaincode = %s' % (privkey, bytes.decode(binascii.hexlify(chaincode))))
         pubkey = pubkey_address.privkey2pubkey(privkey, compressed)
         return privkey, pubkey
 
@@ -124,4 +126,4 @@ if __name__ == '__main__':
         print('child private key = %x, child chaincode = %s' % (child_privkey, bytes.decode(binascii.hexlify(child_chaincode))))
 
         privkey, chaincode = generatePrivkeyPubkeyPair('m / 5\'/ 6', seed, True)
-        print('keys at m / 5\'/6: private key = %x, chaincode = %s' % (privkey, bytes.decode(binascii.hexlify(chaincode))))
+        print('keys at m / 5\'/6: private key = %x, public key = %s' % (privkey, bytes.decode(binascii.hexlify(chaincode))))

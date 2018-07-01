@@ -50,6 +50,9 @@ def base58checkEncode(prefix: bytes, h: bytes):
         print('encoded base58 = %s' % encode)
         return encode
 
+def base58checkDecode(h: bytes):
+        pass
+
 def base58checkVerify(prefix: str, val: str):
         decoded_val = base58_decode(val)
         decoded_prefix = base58_decode(prefix)

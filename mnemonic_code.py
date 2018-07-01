@@ -4,10 +4,11 @@ import binascii
 from functools import reduce
 
 def getMnemonicWordSelectorBits():
-#        rnd_bits = random_number_generator.get256BitRandomNumber()
-        rnd_str = '2041546864449caff939d32d574753fe684d3c947c3346713dd8423e74abcf8c'
-        print('Random String = %s' % rnd_str)
-        rnd_bits = binascii.unhexlify('2041546864449caff939d32d574753fe684d3c947c3346713dd8423e74abcf8c')
+        rnd_bits = random_number_generator.get256BitRandomNumber()
+#        rnd_str = '2041546864449caff939d32d574753fe684d3c947c3346713dd8423e74abcf8c'
+#        print('Random String = %s' % rnd_str.upper())
+        print('Random String = %s' % bytes.decode(binascii.hexlify(rnd_bits)).upper())
+#        rnd_bits = binascii.unhexlify('2041546864449caff939d32d574753fe684d3c947c3346713dd8423e74abcf8c')
         mnemonic_selector_bits = rnd_bits + hashlib.sha256(rnd_bits).digest()[0:1]
         return mnemonic_selector_bits
 

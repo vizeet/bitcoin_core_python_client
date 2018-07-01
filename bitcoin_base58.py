@@ -50,8 +50,14 @@ def addressVerify(address: str):
         is_valid = base58.base58checkVerify(prefix, address)
         return is_valid
 
-def forWifPrivkey(h: bytes, is_testnet: bool, for_compressed_pubkey: bool):
+def encodeWifPrivkey(h: int, is_testnet: bool, for_compressed_pubkey: bool):
         prefix = base58_prefixes[("Mainnet", "Testnet")[is_testnet == True]][("WIF_Uncompressed", "WIF_Compressed")[for_compressed_pubkey == True]]
         print('wif prefix before encoding = %02x' % prefix)
-        wif_encoded = base58.base58checkEncode(binascii.unhexlify('%02x' % prefix), h)
+        h_b = binascii.unhexlify('%064x' % h)
+        if for_compressed_pubkey == True:
+                h_b = h_b + b'\01'
+        wif_encoded = base58.base58checkEncode(binascii.unhexlify('%02x' % prefix), h_b)
         return wif_encoded
+
+def decodeWifPrivkey(privkey_wif: str):
+        pass
