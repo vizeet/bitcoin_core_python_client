@@ -25,7 +25,7 @@ txn_hash = '581cff2eab901adce9e62f08ee7e8306d7a6d678a1974c029d33ec9426d0b14f' #B
 #txn_hash = '7f48d5fd4c993305d5fe027c5ddc23b95a0757657f91de75cf1cd2dc732f284c' #P2SH-P2WPKH
 #txn_hash = '714e0aac85acd5748094c1a9b792ee847cbe2e9544e5d4f73bdbd0437550cda4'
 #block_hash = '0000000000000000009a8aa7b36b0e37a28bf98956097b7b844e172692e604e1' # Pre-Segwit
-block_hash = '0000000000000000000e377cd4083945678ad30c533a8729198bf3b12a8e9315' # Segwit block
+#block_hash = '0000000000000000000e377cd4083945678ad30c533a8729198bf3b12a8e9315' # Segwit block
 
 g_multisig_counter = 0
 
@@ -1137,5 +1137,5 @@ if __name__ == '__main__':
 #        scriptCode='210321a1b4858bb05350c68190a2b4517aeac6b4ec72e9a9a059e543083c63915423'
 #        print('scriptCode = %s' % scriptCode)
 
-        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
-        validate_all_transactions_of_block(block_hash_bigendian_b)
+#        block_hash_bigendian_b = binascii.unhexlify(block_hash)[::-1]
+#        validate_all_transactions_of_block(block_hash_bigendian_b)

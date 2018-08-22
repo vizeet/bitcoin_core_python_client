@@ -48,7 +48,7 @@ class EllipticCurveMath:
         #rx = c2 - 2px
         #ry = c (px - rx) - py
         def pointDoublingOp(self, p):
-                c = ((3 * (p[0] * p[0]) + self.a) * self.modinv(2 * p[1], self.P)) % self.P
+                c = ((3 * (p[0] * p[0]) + self.a) * self.modinv(2 * p[1] % self.P, self.P)) % self.P
                 rx = (c * c - 2 * p[0]) % self.P
                 ry = (c * (p[0] - rx) - p[1]) % self.P
                 r = (rx, ry)
@@ -86,5 +86,6 @@ class EllipticCurveMath:
 
 if __name__ == '__main__':
         elliptic = EllipticCurveMath((0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798, 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8), 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141, 0, 7)
-        m = elliptic.scalarMultiplicationOp((0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798, 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8), 0x18E14A7B6A307F426A94F8114701E7C8E774E7F9A47E2C2035DB29A206321725)
+        #m = elliptic.scalarMultiplicationOp((0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798, 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8), 0x18E14A7B6A307F426A94F8114701E7C8E774E7F9A47E2C2035DB29A206321725)
+        m = elliptic.scalarMultiplicationOp((0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798, 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8),  0x3063CACEAF954F63145E4A23A5A467D9C2CC044421E4412C50CBE04CF9D3700E)
         print('04 %x %x' % (m[0], m[1]))

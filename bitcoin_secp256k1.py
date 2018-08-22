@@ -33,5 +33,15 @@ class BitcoinSec256k1:
 if __name__ == '__main__':
 
         bitcoin_sec256k1 = BitcoinSec256k1()
-        pubkey = bitcoin_sec256k1.privkey2pubkey(0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725)
-        print('pubkey = (%x, %x)' % (pubkey[0],pubkey[1]))
+        while True:
+                privkey_s = input('Enter Private Key: ')
+                privkey_i = int(privkey_s, 16)
+#               pubkey = bitcoin_sec256k1.privkey2pubkey(0x18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725)
+                pubkey = bitcoin_sec256k1.privkey2pubkey(privkey_i)
+                pubkey_c = '04%064x%064x' % (pubkey[0],pubkey[1])
+                print('pubkey = %s' % pubkey_c)
+                pubkey_a = input('verify = ')
+                if pubkey_a == pubkey_c:
+                        print('Right')
+                else:
+                        print('Wrong')

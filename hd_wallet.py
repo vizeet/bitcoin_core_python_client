@@ -119,11 +119,14 @@ if __name__ == '__main__':
 
         # for hardened
         child_privkey, child_chaincode = generateChildAtIndex(master_privkey, master_chaincode, 1<<31)
-        print('child private key = %x, child chaincode = %s' % (child_privkey, bytes.decode(binascii.hexlify(child_chaincode))))
+        print('m/0\': child private key = %x, child chaincode = %s' % (child_privkey, bytes.decode(binascii.hexlify(child_chaincode))))
 
         # for normal
         child_privkey, child_chaincode = generateChildAtIndex(master_privkey, master_chaincode, 0)
-        print('child private key = %x, child chaincode = %s' % (child_privkey, bytes.decode(binascii.hexlify(child_chaincode))))
+        print('m/0: child private key = %x, child chaincode = %s' % (child_privkey, bytes.decode(binascii.hexlify(child_chaincode))))
 
         privkey, chaincode = generatePrivkeyPubkeyPair('m / 5\'/ 6', seed, True)
         print('keys at m / 5\'/6: private key = %x, public key = %s' % (privkey, bytes.decode(binascii.hexlify(chaincode))))
+
+        privkey, chaincode = generatePrivkeyPubkeyPair('m / 1', seed, True)
+        print('keys at m / 1: private key = %x, public key = %s' % (privkey, bytes.decode(binascii.hexlify(chaincode))))

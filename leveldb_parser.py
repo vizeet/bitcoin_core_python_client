@@ -65,8 +65,8 @@ def b128_varint_encode(n: int):
     """
     l = 0
     tmp = []
-    data = ""
-    ret = bytes(0)
+    #data = ""
+    #ret = bytes(0)
     while True:
         tmp.insert(0, n & 0x7F)
         if l != 0:
@@ -100,35 +100,31 @@ def amount_compress(n: int):
         return 0
     e = 0
     while ((n % 10) == 0) and e < 9:
-        n = int(n / 10)
+        n = n // 10
         e += 1
     if e < 9:
         d = n % 10
         assert(d >= 1 and d <= 9)
-        n = int(n / 10)
+        n = n // 10
         return 1 + (n*9 + d - 1)*10 + e
     else:
         return 1 + (n - 1)*10 + 9
 
 def amount_decompress(x: int):
     print('1 x = %d' % x)
-    # x = 0  OR  x = 1+10*(9*n + d - 1) + e  OR  x = 1+10*(n - 1) + 9
     if x == 0:
         return 0
     x -=1
-    # x = 10*(9*n + d - 1) + e
     e = x % 10
     print('e = %d' % e)
-    x = int(x / 10)
+    x = x // 10
     print('2 x = %d' % x)
     n = 0
     if e < 9:
-        # x = 9*n + d - 1
         d = (x % 9) + 1
         print('1 d = %d' % d)
-        x = int(x / 9)
+        x = x // 9
         print('3 x = %f' % x)
-        # x = n
         n = x*10 + d
         print('1 n = %d' % n)
     else:
@@ -363,3 +359,7 @@ if __name__ == '__main__':
         print('....txn_id = %s' % bytes.decode(binascii.hexlify(binascii.unhexlify('0060c16adcf98e70c1d9e8c971ad9f27d3363394993156691ec9f3a46c4c4a4d')[::-1])))
         jsonobj = getChainstateData(binascii.unhexlify('0060c16adcf98e70c1d9e8c971ad9f27d3363394993156691ec9f3a46c4c4a4d'), 1822)
         print(jsonobj)
+        amount = 53263
+        compressed_amount = amount_compress(amount)
+        uncompressed_amount = amount_decompress(compressed_amount)
+        print('amount = %d, compressed = %d, uncompressed = %d' % (amount, compressed_amount, uncompressed_amount))
