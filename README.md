@@ -19,4 +19,3 @@ Contains many useful Programs to parse bitcoin blockchain
 1. BlockFileParser.ipynb : Contains information on structure of blockfile, blocks and transactions
 2. BitcoinRPCUtils.ipynb : Contains many utility methods such as target threshold, current block size, actual block reward etc
 3. BitcoinEllipticCurveCryptography.ipynb : Detailed information on Bitcoin elliptic curve cryptography
-4. 
